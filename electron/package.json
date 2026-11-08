@@ -1,0 +1,39 @@
+{
+  "name": "llm-launcher-reference",
+  "productName": "LLM Launcher Reference",
+  "version": "1.0.0",
+  "description": "Функциональная копия SPA LLM Launcher с эмуляцией backend'а",
+  "author": "nekdfl",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "copy": "node -e \"require('fs').mkdirSync('app',{recursive:true});require('fs').copyFileSync('../build/app/index.html','app/index.html')\"",
+    "start": "npm run copy && electron .",
+    "dist": "npm run copy && electron-builder --linux AppImage tar.gz --win portable zip --x64",
+    "dist:linux": "npm run copy && electron-builder --linux AppImage tar.gz --x64 --publish never",
+    "dist:win": "npm run copy && electron-builder --win portable zip --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "ru.teji.llm-launcher.reference",
+    "files": [
+      "main.js",
+      "app/index.html"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "linux": {
+      "category": "Development",
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
+    },
+    "win": {
+      "signAndEditExecutable": false,
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+    }
+  },
+  "license": "MIT"
+}

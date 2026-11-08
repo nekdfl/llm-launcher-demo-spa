@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Copied from the reference mockups' style block verbatim — the same
+   CSS-only hover technique (adjacent-sibling opacity reveal, no JS) drives
+   chart tooltips here as in the static mockups. */
+.material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+}
+body {
+  background-color: #131313;
+  color: #e5e2e1;
+  font-family: "Inter", sans-serif;
+}
+.tactical-accent {
+  box-shadow: inset 4px 0 0 0 #3ce36a;
+}
+.tactical-accent-warn {
+  box-shadow: inset 4px 0 0 0 #f1c100;
+}
+.tactical-accent-danger {
+  box-shadow: inset 4px 0 0 0 #ff5c5c;
+}
+.tactical-accent-off {
+  box-shadow: inset 4px 0 0 0 #4a4a4a;
+}
+.tactical-accent-top {
+  box-shadow: inset 0 4px 0 0 #3ce36a;
+}
+.hit {
+  fill: transparent;
+  cursor: crosshair;
+}
+.tip,
+.tip-cross {
+  opacity: 0;
+  transition: opacity 0.08s;
+  pointer-events: none;
+}
+.hit:hover + .tip {
+  opacity: 1;
+}
+.hit:hover + .tip + .tip-cross {
+  opacity: 1;
+}
+
+/* UI-BEHAVIOR §2: a Tailwind flex/grid utility on the modal container has
+   the same specificity as the [hidden] attribute — whichever comes later
+   in the stylesheet wins, so a modal can be visible on page load. Forced
+   globally instead of relying on class order. */
+[hidden] {
+  display: none !important;
+}
