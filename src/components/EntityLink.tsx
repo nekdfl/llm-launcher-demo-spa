@@ -1,9 +1,8 @@
 import { Link } from "react-router-dom";
-import { FIELD_LABEL } from "./ui";
+import { FIELD_INPUT, FIELD_INPUT_ACCENT, FIELD_LABEL } from "./ui";
 
-const LINK_BOX =
-  "bg-surface-container border border-neutral-800 px-3 py-2 font-mono text-xs text-primary truncate hover:border-primary block";
-const MISSING_BOX = "bg-surface-container border border-neutral-800 px-3 py-2 font-mono text-xs text-neutral-500 truncate block";
+const LINK_BOX = `${FIELD_INPUT_ACCENT} truncate hover:border-primary block`;
+const MISSING_BOX = `${FIELD_INPUT} !text-neutral-500 truncate block`;
 
 /** Строка связи с другой сущностью: подпись, название и ссылка на её
  * страницу — цепочка модель → профиль → inference должна проходиться, а

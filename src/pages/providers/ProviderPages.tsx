@@ -2,17 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { orchestratorApi } from "../../api/orchestrator";
 import type { ModelEntity, Provider } from "../../api/types";
-import {
-  FIELD_INPUT,
-  FIELD_LABEL,
-  GHOST_BUTTON,
-  ListCard,
-  PageHeader,
-  PRIMARY_BUTTON,
-  SECTION_CARD,
-  SECTION_TITLE,
-  StatusBadge,
-} from "../../components/ui";
+import { FIELD_HINT, FIELD_INPUT, FIELD_LABEL, GHOST_BUTTON, ListCard, PRIMARY_BUTTON, PageHeader, SECTION_CARD, SECTION_TITLE, StatusBadge } from "../../components/ui";
 
 /** reference/provider_manager — cards per provider; «локальный каталог» has
  * no settings (spec: "Provider без настроек не кликабелен"), so its card is
@@ -101,13 +91,13 @@ export function ProviderEditPage() {
           <span className={FIELD_LABEL}>HF-токен (для gated-репозиториев)</span>
           <input type="password" className={FIELD_INPUT} value={token} onChange={(e) => setToken(e.currentTarget.value)} />
         </label>
-        <div className="text-[10px] text-neutral-600 font-mono">
+        <div className={FIELD_HINT}>
           Специфичные настройки provider'а живут в его карточке, не в общих системных настройках.
         </div>
       </section>
 
       <section className="bg-surface-container-lowest p-6 mb-6">
-        <div className="text-[11px] font-['Space_Grotesk'] uppercase text-neutral-500 mb-2">
+        <div className={`${FIELD_LABEL} mb-2`}>
           Модели с этого provider'а ({models.length})
         </div>
         <div className="flex flex-col gap-2">

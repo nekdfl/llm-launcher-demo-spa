@@ -5,9 +5,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProfileEditPage } from "./ProfileEditPage";
 import { orchestratorApi } from "../../api/orchestrator";
 import { inferenceEntry } from "../../api/__fixtures__/inference";
+import { profileEntry } from "../../api/__fixtures__/profile";
 
 vi.mock("../../api/orchestrator", () => ({
   orchestratorApi: {
+    getHardwareInfo: vi.fn().mockResolvedValue({ gpus: [], cpus: [], nvml_error: null }),
+    getResourceSettings: vi.fn().mockResolvedValue({ gpu_pool: [0, 1] }),
+    previewLaunchCommand: vi.fn().mockResolvedValue({ argv: [], env: {}, command: "/opt/engine", plugin_name: "llama-cpp" }),
     listModels: vi.fn().mockResolvedValue([]),
     listPlugins: vi.fn().mockResolvedValue([]),
     getProfile: vi.fn(),
@@ -24,11 +28,7 @@ const mockedGetProfile = vi.mocked(orchestratorApi.getProfile);
 const mockedListInferences = vi.mocked(orchestratorApi.listInferences);
 const mockedDelete = vi.mocked(orchestratorApi.deleteProfile);
 
-const PROFILE = {
-  id: 5, name: "profile-5", model_id: 1, engine_plugin_id: 1, gpu_ids: [], port: 8090,
-  structural_fields: {}, cli_options: "", system_prompt: "", plugin_version: "1.0.0",
-  schema_hash: "x", origin_profile_id: null, needs_review: false, reasoning: false, input_modalities: ["text"],
-};
+const PROFILE = profileEntry({ id: 5, name: "profile-5" });
 
 beforeEach(() => {
   mockedGetProfile.mockReset().mockResolvedValue(PROFILE);
@@ -220,7 +220,7 @@ describe("ProfileEditPage — подбор движка и поля схемы",
       { id: 1, name: "vllm", plugin_type: "engine", tasks: ["text-generation"], model_formats: ["safetensors"] },
       { id: 2, name: "moss-tts", plugin_type: "engine", tasks: ["text-to-speech"], model_formats: ["safetensors"] },
     ] as never);
-    mockedGetProfile.mockResolvedValue({ ...PROFILE, engine_plugin_id: 2 });
+    mockedGetProfile.mockResolvedValue({ ...PROFILE, plugin_id: 2 });
     vi.mocked(orchestratorApi.getPluginSchema).mockResolvedValue({
       install_schema: [], extensions: [],
       profile_schema: [{ name: "text_ruaccent", type: "path", label: "Модель RUAccent", required: false,
@@ -241,5 +241,49 @@ describe("ProfileEditPage — подбор движка и поля схемы",
         5, expect.objectContaining({ structural_fields: { text_ruaccent: "/models/ruaccent" } })
       )
     );
+  });
+});
+
+describe("ProfileEditPage — блок «Параметры запуска»", () => {
+  it("драйвер из схемы плагина — в блоке запуска, опции — менеджером аргументов", async () => {
+    mockedGetProfile.mockResolvedValue({ ...PROFILE, structural_fields: { driver: "cpu" }, cli_options: "-ngl 99 --ctx-size=4096" });
+    vi.mocked(orchestratorApi.getPluginSchema).mockResolvedValue({
+      install_schema: [],
+      profile_schema: [
+        { name: "driver", type: "choice", label: "Драйвер", required: true, default: "nvidia", choices: ["nvidia", "cpu", "rocm"], description: "" },
+      ],
+      extensions: [],
+    } as never);
+    const updateProfile = vi.mocked(orchestratorApi.updateProfile!).mockReset().mockResolvedValue(PROFILE as never);
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId("profile-field-driver")).toBeInTheDocument());
+    expect(screen.queryByTestId("profile-schema-fields")).not.toBeInTheDocument();
+    expect(screen.getByTestId("profile-argv-count")).toHaveTextContent("2 параметра");
+
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText("Разделитель #2"));
+    await user.click(screen.getByText("Сохранить"));
+    await waitFor(() =>
+      expect(updateProfile).toHaveBeenCalledWith(5, expect.objectContaining({ cli_options: "-ngl 99 --ctx-size 4096", structural_fields: { driver: "cpu" } }))
+    );
+  });
+});
+
+describe("ProfileEditPage — общий с inference набор полей", () => {
+  it("блока «Возможности» и trace в профиле нет", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Удалить профиль")).toBeInTheDocument());
+    expect(screen.queryByTestId("capability-fields")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("profile-trace")).not.toBeInTheDocument();
+  });
+
+  it("служебные поля показаны только для чтения", async () => {
+    mockedGetProfile.mockResolvedValue({ ...PROFILE, schema_hash: "h-5", needs_review: true });
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("stamp-schema-hash")).toHaveValue("h-5"));
+    expect(screen.getByTestId("stamp-plugin-version")).toHaveValue("1.0.0");
+    expect(screen.getByTestId("stamp-needs-review")).toHaveValue("да");
+    expect(screen.getByTestId("stamp-schema-hash")).toHaveAttribute("readonly");
   });
 });

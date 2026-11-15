@@ -7,7 +7,7 @@ import { orchestratorApi } from "../../api/orchestrator";
 vi.mock("../../api/orchestrator", () => ({
   orchestratorApi: {
     listProfiles: vi.fn().mockResolvedValue([
-      { id: 1, name: "qwen3-32b", model_id: 10, engine_plugin_id: 20, gpu_ids: [0], port: 8091, structural_fields: {}, cli_options: "", system_prompt: "", plugin_version: "1.0.0", schema_hash: "x", origin_profile_id: null, needs_review: false },
+      { id: 1, name: "qwen3-32b", model_id: 10, plugin_id: 20, gpu_ids: [0], port: 8091, structural_fields: {}, cli_options: "", system_prompt: "", plugin_version: "1.0.0", schema_hash: "x", origin_profile_id: null, needs_review: false },
     ]),
     listModels: vi.fn().mockResolvedValue([{ id: 10, provider_id: 1, ref: "org/Qwen-32B", file_path: "/m", format: "gguf", metadata: {} }]),
     listInferences: vi.fn().mockResolvedValue([]),
@@ -44,7 +44,7 @@ describe("ProfilesList — негодная модель профиля", () => 
         id: 1,
         name: "qwen3-32b",
         model_id: 10,
-        engine_plugin_id: 20,
+        plugin_id: 20,
         gpu_ids: [0],
         port: 8091,
         structural_fields: {},

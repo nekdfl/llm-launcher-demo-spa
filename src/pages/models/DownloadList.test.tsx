@@ -535,7 +535,7 @@ describe("DownloadList — карточка не предлагает повто
 
 describe("DownloadList — плитка умещается в ширину окна", () => {
   const LONG_REF =
-    "mradermacher/Mistral-Nemo-2407-12B-Instruct-Long-Repository-Name-GGUF";
+    "mradermacher/Mistral-Nemo-2407-12B-Thinking-Claude-Gemini-GPT5.2-Uncensored-HERETIC-GGUF";
 
   it("длинное имя репозитория сжимается и усекается, величины прогресса не выдавливаются", () => {
     const { container } = render(

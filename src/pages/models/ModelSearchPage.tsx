@@ -15,7 +15,7 @@ import { ModelCard } from "../../components/ModelCard";
 import { ModelMetaInfo } from "../../components/ModelMetaInfo";
 import { ModelTile } from "../../components/ModelTile";
 import { ModelsQuickSwitch } from "../../components/ModelsQuickSwitch";
-import { FIELD_INPUT, GHOST_BUTTON, PRIMARY_BUTTON, PageHeader, SECTION_CARD, SECTION_TITLE } from "../../components/ui";
+import { CHECKBOX, FIELD_INPUT, FIELD_LABEL, GHOST_BUTTON, PRIMARY_BUTTON, PageHeader, SECTION_CARD, SECTION_TITLE } from "../../components/ui";
 import { formatBytes } from "../../lib/formatBytes";
 import { modelTasks } from "../../lib/modelMeta";
 import { resultDownloadStatus } from "./downloadStatus";
@@ -265,7 +265,7 @@ export function ModelSearchPage() {
           ))}
         </select>
         <input
-          className="flex-grow bg-surface-container-low border border-neutral-800 px-3 py-2 text-sm font-mono"
+          className={`${FIELD_INPUT} flex-grow !text-sm`}
           placeholder="Название модели или репозитория"
           value={query}
           onChange={(e) => setQuery(e.currentTarget.value)}
@@ -282,7 +282,7 @@ export function ModelSearchPage() {
         <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-6 mb-6">
           <aside className="flex flex-col gap-6" data-testid="model-browse-filters">
             <div>
-              <div className="text-[11px] font-['Space_Grotesk'] uppercase text-neutral-500 mb-2">Сортировка</div>
+              <div className={`${FIELD_LABEL} mb-2`}>Сортировка</div>
               <select
                 className={`w-full ${FIELD_INPUT} text-xs`}
                 value={sort}
@@ -310,12 +310,12 @@ export function ModelSearchPage() {
             />
 
             <div>
-              <div className="text-[11px] font-['Space_Grotesk'] uppercase text-neutral-500 mb-2">Parameters</div>
+              <div className={`${FIELD_LABEL} mb-2`}>Parameters</div>
               {PARAMETER_BUCKETS.map((bucket) => (
                 <label key={bucket.label} className="flex items-center gap-2 text-xs text-neutral-300 mb-1">
                   <input
                     type="checkbox"
-                    className="accent-primary"
+                    className={CHECKBOX}
                     checked={selectedBuckets.has(bucket.label)}
                     onChange={() => toggle(selectedBuckets, setSelectedBuckets, bucket.label)}
                   />
@@ -325,12 +325,12 @@ export function ModelSearchPage() {
             </div>
 
             <div>
-              <div className="text-[11px] font-['Space_Grotesk'] uppercase text-neutral-500 mb-2">License</div>
+              <div className={`${FIELD_LABEL} mb-2`}>License</div>
               {LICENSE_OPTIONS.map((license) => (
                 <label key={license} className="flex items-center gap-2 text-xs text-neutral-300 mb-1">
                   <input
                     type="checkbox"
-                    className="accent-primary"
+                    className={CHECKBOX}
                     checked={selectedLicenses.has(license)}
                     onChange={() => toggle(selectedLicenses, setSelectedLicenses, license)}
                   />
@@ -460,9 +460,9 @@ function FilterChecklist({
 
   return (
     <div>
-      <div className="text-[11px] font-['Space_Grotesk'] uppercase text-neutral-500 mb-2">{title}</div>
+      <div className={`${FIELD_LABEL} mb-2`}>{title}</div>
       <input
-        className="w-full bg-surface-container-low border border-neutral-800 px-2 py-1.5 text-[11px] font-mono mb-2"
+        className={`${FIELD_INPUT} w-full !px-2 !py-1.5 !text-[11px] mb-2`}
         placeholder={`Filter ${title.toLowerCase()}`}
         value={filterText}
         onChange={(e) => setFilterText(e.currentTarget.value)}
@@ -471,7 +471,7 @@ function FilterChecklist({
         <label key={option.value} className="flex items-center gap-2 text-xs text-neutral-300 mb-1">
           <input
             type="checkbox"
-            className="accent-primary"
+            className={CHECKBOX}
             checked={selected.has(option.value)}
             onChange={() => onToggle(option.value)}
           />

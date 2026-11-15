@@ -17,7 +17,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     id: 1,
     name: "default",
     model_id: 1,
-    engine_plugin_id: 1,
+    plugin_id: 1,
     gpu_ids: [0],
     port: 8080,
     structural_fields: { driver: "cpu" },
@@ -27,8 +27,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     schema_hash: "abc",
     origin_profile_id: null,
     needs_review: false,
-    reasoning: false,
-    input_modalities: ["text"],
+    extensions: {},
     ...overrides,
   };
 }
@@ -56,6 +55,17 @@ describe("hasProfileDiscrepancy", () => {
   it("is true when structural_fields diverge", () => {
     const inference = makeInference({ structural_fields: { driver: "nvidia" } });
     expect(hasProfileDiscrepancy(inference, makeProfile())).toBe(true);
+  });
+
+  it("is true when extensions diverge", () => {
+    const inference = makeInference({ extensions: { "ru-stress": { stress_mode: "auto" } } });
+    expect(hasProfileDiscrepancy(inference, makeProfile())).toBe(true);
+  });
+
+  it("ignores key order in structural_fields", () => {
+    const inference = makeInference({ structural_fields: { b: 1, driver: "cpu" } });
+    const profile = makeProfile({ structural_fields: { driver: "cpu", b: 1 } });
+    expect(hasProfileDiscrepancy(inference, profile)).toBe(false);
   });
 
   it("is true when port diverges", () => {

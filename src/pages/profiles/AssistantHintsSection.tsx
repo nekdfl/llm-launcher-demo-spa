@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { orchestratorApi } from "../../api/orchestrator";
 import type { AssistantSuggestion, AssistantSuggestionsResponse } from "../../api/types";
+import { FIELD_HINT, FIELD_LABEL } from "../../components/ui";
 
 /** reference/profile_create/profile_edit, section «Подсказки LLM-помощника».
  * Each suggestion is its own row with its README quote as evidence and is
@@ -49,10 +50,10 @@ export function AssistantHintsSection({
   if (!response || !response.available) {
     return (
       <section className="bg-surface-container-lowest p-6 mb-6" data-testid="assistant-hints-unavailable">
-        <div className="text-[11px] font-['Space_Grotesk'] uppercase text-neutral-500 mb-2">
+        <div className={`${FIELD_LABEL} mb-2`}>
           Подсказки LLM-помощника <span className="text-neutral-700">(необязательно)</span>
         </div>
-        <div className="text-[10px] text-neutral-600 font-mono">
+        <div className={FIELD_HINT}>
           Помощник не запущен или не настроен — профиль создаётся с параметрами формулы.
         </div>
       </section>
@@ -66,7 +67,7 @@ export function AssistantHintsSection({
 
   return (
     <section className="bg-surface-container-lowest p-6 mb-6" data-testid="assistant-hints">
-      <div className="text-[11px] font-['Space_Grotesk'] uppercase text-neutral-500 mb-2">
+      <div className={`${FIELD_LABEL} mb-2`}>
         Подсказки LLM-помощника <span className="text-neutral-700">(необязательно)</span>
       </div>
       <div className="flex flex-col gap-2">

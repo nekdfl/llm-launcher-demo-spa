@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { orchestratorApi } from "../../api/orchestrator";
-import { FIELD_INPUT, FIELD_LABEL, PRIMARY_BUTTON } from "../../components/ui";
+import { FIELD_HINT, FIELD_INPUT, FIELD_LABEL, PRIMARY_BUTTON, SECTION_TITLE } from "../../components/ui";
 
 /** reference/settings, «Хранение и помощник» — the assistant is an ordinary
  * inference behind the router, so configuring it means pointing at the
@@ -52,7 +52,7 @@ export function AssistantSettingsSection() {
   return (
     <section id="assistant" className="bg-surface-container-lowest p-6 mb-6 scroll-mt-20" data-testid="assistant-settings">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="font-['Space_Grotesk'] text-xs font-bold uppercase tracking-widest text-primary">
+        <h2 className={`${SECTION_TITLE} !mb-0`}>
           Помощник профилей <span className="text-neutral-600 normal-case font-normal">(необязательно)</span>
         </h2>
         <span
@@ -105,7 +105,7 @@ export function AssistantSettingsSection() {
         {saved && <span className="text-xs text-primary font-mono">Сохранено</span>}
         {error && <span className="text-xs text-danger font-mono">{error}</span>}
       </div>
-      <div className="text-[10px] text-neutral-600 font-mono mt-3">
+      <div className={`${FIELD_HINT} mt-3`}>
         Помощник — обычный inference за роутером, разумно держать его на CPU. Пока он не настроен или не запущен, формы профилей работают только с формулой.
       </div>
     </section>

@@ -13,7 +13,7 @@ import { ModelCard } from "../../components/ModelCard";
 import { ModelMetaInfo } from "../../components/ModelMetaInfo";
 import { ModelTile } from "../../components/ModelTile";
 import { ModelsQuickSwitch } from "../../components/ModelsQuickSwitch";
-import { PageHeader } from "../../components/ui";
+import { PageHeader, SECTION_TITLE } from "../../components/ui";
 import { formatBytes } from "../../lib/formatBytes";
 import { modelTasks } from "../../lib/modelMeta";
 
@@ -79,7 +79,7 @@ export function ModelDownloadsPage() {
       <ModelsQuickSwitch />
 
       <section className="bg-surface-container-lowest p-6">
-        <h2 className="font-['Space_Grotesk'] text-xs font-bold uppercase tracking-widest text-primary mb-4">
+        <h2 className={SECTION_TITLE}>
           Загрузки
         </h2>
         <DownloadList

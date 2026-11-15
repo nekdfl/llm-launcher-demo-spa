@@ -3,21 +3,10 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { accountsApi } from "../../api/accounts";
 import { apiErrorMessage } from "../../api/client";
 import { orchestratorApi } from "../../api/orchestrator";
-import type { EngineInstallation, PluginRecord } from "../../api/types";
+import type { PluginRecord } from "../../api/types";
 import { Modal } from "../../components/Modal";
 import { ExtensionsSection } from "./ExtensionsSection";
-import {
-  FIELD_INPUT,
-  FIELD_LABEL,
-  GHOST_BUTTON,
-  ListCard,
-  PageHeader,
-  PRIMARY_BUTTON,
-  SECTION_CARD,
-  SECTION_TITLE,
-  SMALL_BUTTON,
-  type AccentTone,
-} from "../../components/ui";
+import { FIELD_HINT, FIELD_INPUT, FIELD_LABEL, GHOST_BUTTON, ListCard, PRIMARY_BUTTON, PageHeader, SECTION_CARD, SECTION_TITLE, SMALL_BUTTON, type AccentTone } from "../../components/ui";
 
 /** reference/plugins — code-only screen (spec: "Экран плагинов — только
  * код"), install from tar.gz is a modal and admin-only. */
@@ -60,7 +49,7 @@ export function PluginsPage() {
       await orchestratorApi.deletePlugin(plugin.id);
       setPlugins(await orchestratorApi.listPlugins());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "нельзя удалить плагин: есть ссылающиеся установки");
+      setError(err instanceof Error ? err.message : "нельзя удалить плагин: на него ссылаются");
     }
   }
 
@@ -89,7 +78,7 @@ export function PluginsPage() {
         )}
       </PageHeader>
 
-      {!isAdmin && <div className="text-[10px] text-neutral-600 font-mono uppercase mb-6">установка доступна только роли admin</div>}
+      {!isAdmin && <div className={`${FIELD_HINT} uppercase mb-6`}>установка доступна только роли admin</div>}
 
       {error && <p className="text-xs text-danger font-mono mb-4">{error}</p>}
 
@@ -162,7 +151,7 @@ export function PluginsPage() {
           <input
             type="file"
             accept=".tar.gz,.tgz"
-            className="bg-surface-container border border-neutral-800 px-3 py-2 font-mono text-xs file:mr-3 file:bg-surface-container-high file:border-0 file:px-2 file:py-1 file:text-neutral-300"
+            className={`${FIELD_INPUT} file:mr-3 file:bg-surface-container-high file:border-0 file:px-2 file:py-1 file:text-neutral-300`}
             onChange={(e) => setArchive(e.currentTarget.files?.[0] ?? null)}
           />
         </label>
@@ -170,7 +159,7 @@ export function PluginsPage() {
           <span className={FIELD_LABEL}>Контрольная сумма SHA-256</span>
           <input className={FIELD_INPUT} placeholder="a1c9…f04e" value={sha256} onChange={(e) => setSha256(e.currentTarget.value)} />
         </label>
-        <div className="text-[10px] text-neutral-600 font-mono mt-3">
+        <div className={`${FIELD_HINT} mt-3`}>
           Пути внутри архива проверяются на выход за пределы каталога установки; лимит на распакованный размер применяется по ходу распаковки.
         </div>
         {error && <p className="text-xs text-danger font-mono mt-3">{error}</p>}
@@ -187,12 +176,14 @@ export function PluginsPage() {
   );
 }
 
-/** reference/plugin_detail — manifest grid, this plugin's installations. */
+/** reference/plugin_detail — manifest grid, варианты движка того же кода. */
 export function PluginDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [plugin, setPlugin] = useState<PluginRecord | null>(null);
-  const [installations, setInstallations] = useState<EngineInstallation[]>([]);
+  // Engine-плагин — вариант движка; варианты одного кода делят каталог.
+  const [variants, setVariants] = useState<PluginRecord[]>([]);
+  const [references, setReferences] = useState<string[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -200,13 +191,18 @@ export function PluginDetailPage() {
     if (!id) return;
     (async () => {
       try {
-        const [pluginList, installationList] = await Promise.all([
+        const [pluginList, profileList, inferenceList] = await Promise.all([
           orchestratorApi.listPlugins(),
-          orchestratorApi.listEngineInstallations(),
+          orchestratorApi.listProfiles(),
+          orchestratorApi.listInferences(),
         ]);
         const found = pluginList.find((p) => p.id === Number(id)) ?? null;
         setPlugin(found);
-        setInstallations(installationList.filter((i) => i.plugin_id === Number(id)));
+        setVariants(found && found.plugin_type === "engine" ? pluginList.filter((p) => p.path === found.path) : []);
+        setReferences([
+          ...profileList.filter((p) => p.plugin_id === Number(id)).map((p) => `профиль ${p.name}`),
+          ...inferenceList.filter((i) => i.plugin_id === Number(id)).map((i) => `inference ${i.slug}`),
+        ]);
         if (!found) setError("Плагин не найден");
       } catch {
         setError("Не удалось загрузить плагин");
@@ -252,22 +248,22 @@ export function PluginDetailPage() {
         {plugin.error_detail && <div className="text-[10px] text-danger font-mono mt-3">{plugin.error_detail}</div>}
       </section>
 
-      <section className="bg-surface-container-lowest p-6 mb-6">
-        <div className="text-[11px] font-['Space_Grotesk'] uppercase text-neutral-500 mb-2">
-          Установки этого плагина ({installations.length})
-        </div>
-        <div className="flex flex-col gap-2">
-          {installations.map((installation) => (
-            <ListCard
-              key={installation.id}
-              to={`/engines/${installation.id}`}
-              accent={installation.available ? "primary" : "danger"}
-              title={installation.name}
-              badge={{ tone: installation.available ? "primary" : "danger", label: installation.available ? "доступна" : "недоступна" }}
-            />
-          ))}
-        </div>
-      </section>
+      {variants.length > 0 && (
+        <section className="bg-surface-container-lowest p-6 mb-6" data-testid="plugin-variants">
+          <div className={`${FIELD_LABEL} mb-2`}>Варианты движка этого кода ({variants.length})</div>
+          <div className="flex flex-col gap-2">
+            {variants.map((variant) => (
+              <ListCard
+                key={variant.id}
+                to={`/engines/${variant.id}`}
+                accent={variant.available ? "primary" : "danger"}
+                title={variant.name}
+                badge={{ tone: variant.available ? "primary" : "danger", label: variant.available ? "доступен" : "недоступен" }}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {plugin.plugin_type === "engine" && <ExtensionsSection plugin={plugin} isAdmin={isAdmin} />}
 
@@ -283,11 +279,11 @@ export function PluginDetailPage() {
               await orchestratorApi.deletePlugin(plugin.id);
               navigate("/plugins");
             } catch (err) {
-              setError(err instanceof Error ? err.message : "нельзя удалить: есть установки, ссылающиеся на плагин");
+              setError(err instanceof Error ? err.message : "нельзя удалить: на плагин ссылаются");
             }
           }}
-          disabled={installations.length > 0}
-          title={installations.length > 0 ? "нельзя удалить: есть установки, ссылающиеся на плагин" : undefined}
+          disabled={references.length > 0}
+          title={references.length > 0 ? `нельзя удалить: на плагин ссылаются ${references.join(", ")}` : undefined}
           className="px-4 py-2 border border-danger/30 text-danger/40 font-['Space_Grotesk'] text-xs font-bold uppercase disabled:cursor-not-allowed enabled:hover:bg-danger enabled:hover:text-black"
         >
           Удалить плагин

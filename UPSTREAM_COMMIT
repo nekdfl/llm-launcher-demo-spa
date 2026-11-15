@@ -1,0 +1,4 @@
+# Коммит llm-launcher, с которого перенесены src/ и reference-mock/.
+commit: 618fbf54ea4f758c811dd48baf6cfe6aaf5391d8
+date: 2026-11-15
+subject: Убирает trace и «Возможности» из интерфейса и выравнивает поля профиля и inference

@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
-import { EngineInstallCreatePage, EngineInstallDetailPage, EngineManagerPage } from "./pages/engines/EnginePages";
+import { EngineVariantCreatePage, EngineVariantDetailPage, EngineManagerPage } from "./pages/engines/EnginePages";
 import { DownloadedModelsPage } from "./pages/models/ModelsPages";
 import { ModelSearchPage } from "./pages/models/ModelSearchPage";
 import { ModelDownloadsPage } from "./pages/models/ModelDownloadsPage";
@@ -42,8 +42,8 @@ export function App() {
           <Route path="/profiles/:id" element={<ProfileEditPage mode="edit" />} />
 
           <Route path="/engines" element={<EngineManagerPage />} />
-          <Route path="/engines/new" element={<EngineInstallCreatePage />} />
-          <Route path="/engines/:id" element={<EngineInstallDetailPage />} />
+          <Route path="/engines/new" element={<EngineVariantCreatePage />} />
+          <Route path="/engines/:id" element={<EngineVariantDetailPage />} />
 
           <Route path="/providers" element={<ProviderManagerPage />} />
           <Route path="/providers/:id" element={<ProviderEditPage />} />

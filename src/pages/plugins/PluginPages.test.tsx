@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PluginDetailPage, PluginsPage } from "./PluginPages";
 import { accountsApi } from "../../api/accounts";
 import { orchestratorApi } from "../../api/orchestrator";
+import { pluginEntry } from "../../api/__fixtures__/profile";
 
 vi.mock("../../api/accounts", () => ({
   accountsApi: { isAdmin: vi.fn() },
@@ -13,7 +14,7 @@ vi.mock("../../api/accounts", () => ({
 vi.mock("../../api/orchestrator", () => ({
   orchestratorApi: {
     listPlugins: vi.fn(),
-    listEngineInstallations: vi.fn().mockResolvedValue([]),
+    listInferences: vi.fn().mockResolvedValue([]),
     disablePlugin: vi.fn(),
     enablePlugin: vi.fn(),
     deletePlugin: vi.fn(),
@@ -29,18 +30,7 @@ const mockedList = vi.mocked(orchestratorApi.listPlugins);
 const mockedDisable = vi.mocked(orchestratorApi.disablePlugin);
 const mockedEnable = vi.mocked(orchestratorApi.enablePlugin);
 
-const OK_PLUGIN = {
-  id: 1,
-  name: "llama.cpp",
-  plugin_version: "1.0.0",
-  contract_version: "1",
-  plugin_type: "engine",
-  path: "/plugins/llama-cpp",
-  status: "ok",
-  error_detail: null,
-  enabled: true,
-  tasks: ["text-generation"],
-};
+const OK_PLUGIN = pluginEntry({ name: "llama.cpp", plugin_version: "1.0.0" });
 
 const SCHEMA = { install_schema: [], profile_schema: [], tasks: ["text-to-speech"], extensions_unsupported_reason: null, extensions: [] };
 
@@ -219,7 +209,7 @@ describe("Задачи движка и расширения", () => {
       ],
     });
     vi.mocked(orchestratorApi.listProfiles).mockResolvedValue([
-      { id: 3, name: "tts-profile", engine_plugin_id: 1, extensions: { "ru-stress": {} } } as never,
+      { id: 3, name: "tts-profile", plugin_id: 1, extensions: { "ru-stress": {} } } as never,
     ]);
 
     render(

@@ -3,7 +3,7 @@ import { apiErrorMessage } from "../../api/client";
 import { orchestratorApi } from "../../api/orchestrator";
 import type { EngineExtension, PluginRecord, Profile } from "../../api/types";
 import { Modal } from "../../components/Modal";
-import { FIELD_INPUT, FIELD_LABEL, GHOST_BUTTON, PRIMARY_BUTTON, SECTION_CARD, SECTION_TITLE, SMALL_BUTTON } from "../../components/ui";
+import { FIELD_HINT, FIELD_INPUT, FIELD_LABEL, GHOST_BUTTON, PRIMARY_BUTTON, SECTION_CARD, SECTION_TITLE, SMALL_BUTTON } from "../../components/ui";
 
 const STATUS_LABEL: Record<string, string> = {
   ok: "готово",
@@ -34,7 +34,7 @@ export function ExtensionsSection({ plugin, isAdmin }: { plugin: PluginRecord; i
       ]);
       setExtensions(schema.extensions ?? []);
       setUnsupportedReason(schema.extensions_unsupported_reason ?? null);
-      setProfiles(profileList.filter((p) => p.engine_plugin_id === plugin.id));
+      setProfiles(profileList.filter((p) => p.plugin_id === plugin.id));
     } catch {
       setError("Не удалось загрузить расширения плагина");
     }
@@ -89,7 +89,7 @@ export function ExtensionsSection({ plugin, isAdmin }: { plugin: PluginRecord; i
         </p>
       )}
       {!isAdmin && !unsupportedReason && (
-        <div className="text-[10px] text-neutral-600 font-mono uppercase mb-3">установка доступна только роли admin</div>
+        <div className={`${FIELD_HINT} uppercase mb-3`}>установка доступна только роли admin</div>
       )}
       {extensions.length === 0 && !unsupportedReason && (
         <p className="text-[11px] text-neutral-500 font-mono">Расширений нет</p>
@@ -141,7 +141,7 @@ export function ExtensionsSection({ plugin, isAdmin }: { plugin: PluginRecord; i
             type="file"
             accept=".tar.gz,.tgz"
             data-testid="extension-archive"
-            className="bg-surface-container border border-neutral-800 px-3 py-2 font-mono text-xs file:mr-3 file:bg-surface-container-high file:border-0 file:px-2 file:py-1 file:text-neutral-300"
+            className={`${FIELD_INPUT} file:mr-3 file:bg-surface-container-high file:border-0 file:px-2 file:py-1 file:text-neutral-300`}
             onChange={(e) => setArchive(e.currentTarget.files?.[0] ?? null)}
           />
         </label>
@@ -149,7 +149,7 @@ export function ExtensionsSection({ plugin, isAdmin }: { plugin: PluginRecord; i
           <span className={FIELD_LABEL}>Контрольная сумма SHA-256</span>
           <input className={FIELD_INPUT} value={sha256} onChange={(e) => setSha256(e.currentTarget.value)} data-testid="extension-sha256" />
         </label>
-        <div className="text-[10px] text-neutral-600 font-mono mt-3">
+        <div className={`${FIELD_HINT} mt-3`}>
           Задача расширения должна входить в задачи движка ({plugin.tasks.join(", ")}); несовместимое расширение не устанавливается.
         </div>
         {installError && (

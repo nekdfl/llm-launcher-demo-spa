@@ -2,33 +2,33 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { EngineInstallDetailPage } from "./EnginePages";
+import { EngineVariantDetailPage } from "./EnginePages";
 import { orchestratorApi } from "../../api/orchestrator";
+import { inferenceEntry } from "../../api/__fixtures__/inference";
+import { pluginEntry, profileEntry } from "../../api/__fixtures__/profile";
 
 vi.mock("../../api/orchestrator", () => ({
   orchestratorApi: {
-    getEngineInstallation: vi.fn(),
+    listPlugins: vi.fn(),
     getPluginSchema: vi.fn(),
-    listProfiles: vi.fn().mockResolvedValue([]),
-    updateEngineInstallation: vi.fn(),
-    recheckEngineInstallation: vi.fn(),
-    deleteEngineInstallation: vi.fn(),
+    listProfiles: vi.fn(),
+    listInferences: vi.fn(),
+    updatePlugin: vi.fn(),
+    recheckPlugin: vi.fn(),
+    deletePlugin: vi.fn(),
   },
 }));
 
-const mockedGet = vi.mocked(orchestratorApi.getEngineInstallation);
+const mockedList = vi.mocked(orchestratorApi.listPlugins);
 const mockedGetSchema = vi.mocked(orchestratorApi.getPluginSchema);
-const mockedUpdate = vi.mocked(orchestratorApi.updateEngineInstallation);
+const mockedUpdate = vi.mocked(orchestratorApi.updatePlugin);
 
-const INSTALLATION = {
+const VARIANT = pluginEntry({
   id: 1,
   name: "llama.cpp (cpu)",
-  plugin_id: 1,
   install_fields: { llama_server_path: "/opt/engines/llama.cpp/cpu/llama-server" },
-  version: "b4200",
-  available: true,
-  unavailable_reason: null,
-};
+  engine_version: "b4200",
+});
 
 const INSTALL_SCHEMA = [
   {
@@ -43,7 +43,9 @@ const INSTALL_SCHEMA = [
 ];
 
 beforeEach(() => {
-  mockedGet.mockReset().mockResolvedValue(INSTALLATION);
+  mockedList.mockReset().mockResolvedValue([VARIANT]);
+  vi.mocked(orchestratorApi.listProfiles).mockReset().mockResolvedValue([]);
+  vi.mocked(orchestratorApi.listInferences).mockReset().mockResolvedValue([]);
   mockedGetSchema.mockReset().mockResolvedValue({ install_schema: INSTALL_SCHEMA, profile_schema: [] });
   mockedUpdate.mockReset();
 });
@@ -53,13 +55,13 @@ function renderPage() {
     <MemoryRouter initialEntries={["/engines/1"]}>
       <Routes>
         <Route path="/engines" element={<div data-testid="engines-list">list</div>} />
-        <Route path="/engines/:id" element={<EngineInstallDetailPage />} />
+        <Route path="/engines/:id" element={<EngineVariantDetailPage />} />
       </Routes>
     </MemoryRouter>
   );
 }
 
-describe("EngineInstallDetailPage — редактирование полей (CRUD: Update)", () => {
+describe("EngineVariantDetailPage — редактирование полей (CRUD: Update)", () => {
   it("поля название и путь редактируемые, не disabled", async () => {
     renderPage();
 
@@ -78,7 +80,7 @@ describe("EngineInstallDetailPage — редактирование полей (C
   });
 
   it("сохраняет правки имени и пути", async () => {
-    mockedUpdate.mockResolvedValue({ ...INSTALLATION, name: "renamed", version: "b4300" });
+    mockedUpdate.mockResolvedValue({ ...VARIANT, name: "renamed", engine_version: "b4300" });
     renderPage();
 
     const user = userEvent.setup();
@@ -100,7 +102,7 @@ describe("EngineInstallDetailPage — редактирование полей (C
   });
 
   it("при ошибке сохранения показывает сообщение и не теряет введённые значения", async () => {
-    mockedUpdate.mockRejectedValue(new Error("установка с именем 'taken' уже существует"));
+    mockedUpdate.mockRejectedValue(new Error("движок с именем 'taken' уже существует"));
     renderPage();
 
     const user = userEvent.setup();
@@ -109,7 +111,17 @@ describe("EngineInstallDetailPage — редактирование полей (C
     await user.type(nameInput, "taken");
     await user.click(screen.getByText("Сохранить"));
 
-    await screen.findByText("установка с именем 'taken' уже существует");
+    await screen.findByText("движок с именем 'taken' уже существует");
     expect(screen.getByDisplayValue("taken")).toBeInTheDocument();
+  });
+
+  it("удаление заблокировано, пока на вариант ссылаются профиль или inference", async () => {
+    vi.mocked(orchestratorApi.listProfiles).mockResolvedValue([profileEntry({ plugin_id: 1, name: "p1" })]);
+    vi.mocked(orchestratorApi.listInferences).mockResolvedValue([inferenceEntry({ plugin_id: 1, name: "i1" })]);
+    renderPage();
+
+    expect(await screen.findByText("Удалить вариант")).toBeDisabled();
+    expect(screen.getByText("профиль p1")).toBeInTheDocument();
+    expect(screen.getByText("inference i1")).toBeInTheDocument();
   });
 });

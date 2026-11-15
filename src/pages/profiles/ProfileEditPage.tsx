@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { orchestratorApi } from "../../api/orchestrator";
+import { ArgvEditor } from "../../components/ArgvEditor";
+import { PluginStampFields } from "../../components/PluginStampFields";
+import { EngineBadge } from "../../components/EngineBadge";
 import { EntityLink } from "../../components/EntityLink";
+import { GpuChecklist, toggleGpuId, useGpuChecklistItems } from "../../components/GpuChecklist";
+import { LaunchCommandField } from "../../components/LaunchCommandField";
 import { groupModelsByRepo, modelOptionLabel } from "../../lib/modelOptionLabel";
 import { AssistantHintsSection } from "./AssistantHintsSection";
 import { ProfileExtensionsSection } from "./ProfileExtensionsSection";
@@ -17,29 +22,29 @@ import type {
   PluginRecord,
 } from "../../api/types";
 import { Modal } from "../../components/Modal";
-import {
-  FIELD_INPUT,
-  FIELD_LABEL,
-  GHOST_BUTTON,
-  PageHeader,
-  PRIMARY_BUTTON,
-  SECTION_CARD,
-  SECTION_TITLE,
-} from "../../components/ui";
+import { FIELD_HINT, FIELD_INPUT, FIELD_LABEL, GHOST_BUTTON, PRIMARY_BUTTON, PageHeader, SECTION_CARD, SECTION_TITLE } from "../../components/ui";
 
-const CLI_HINT = "-m, --alias, --host и --port ядро подставляет само из модели, названия профиля и поля «Порт» выше — остальное свободный текст.";
+const CLI_HINT = "-m, --alias, --host и --port ядро подставляет само из модели, названия профиля и поля «Порт» выше — остальное передаётся в argv как записано.";
 
 interface ProfileFormState {
   name: string;
   modelId: string;
-  enginePluginId: string;
+  pluginId: string;
   gpuIds: string;
   port: string;
   cliOptions: string;
   systemPrompt: string;
 }
 
-const EMPTY_FORM: ProfileFormState = { name: "", modelId: "", enginePluginId: "", gpuIds: "", port: "", cliOptions: "", systemPrompt: "" };
+const EMPTY_FORM: ProfileFormState = {
+  name: "",
+  modelId: "",
+  pluginId: "",
+  gpuIds: "",
+  port: "",
+  cliOptions: "",
+  systemPrompt: "",
+};
 
 /** Replaces (or appends) a flag's value in the free-form cli options text —
  * the single-suggestion apply path: one click changes exactly one thing. */
@@ -60,7 +65,7 @@ function toForm(profile: Profile): ProfileFormState {
   return {
     name: profile.name,
     modelId: String(profile.model_id),
-    enginePluginId: String(profile.engine_plugin_id),
+    pluginId: String(profile.plugin_id),
     gpuIds: profile.gpu_ids.join(","),
     port: profile.port === null ? "" : String(profile.port),
     cliOptions: profile.cli_options,
@@ -82,6 +87,7 @@ export function ProfileEditPage({ mode }: { mode: "create" | "edit" }) {
   const [plugins, setPlugins] = useState<PluginRecord[]>([]);
   const [referencingInferences, setReferencingInferences] = useState<Inference[]>([]);
   const [form, setForm] = useState<ProfileFormState>(EMPTY_FORM);
+  const [loadedProfile, setLoadedProfile] = useState<Profile | null>(null);
   const [formula, setFormula] = useState<ProfileFormulaSuggestion | null>(null);
   const [saveAsOpen, setSaveAsOpen] = useState(false);
   const [saveAsName, setSaveAsName] = useState("");
@@ -124,7 +130,8 @@ export function ProfileEditPage({ mode }: { mode: "create" | "edit" }) {
             orchestratorApi.listInferences(),
           ]);
           setForm(toForm(profile));
-          setExtensions(profile.extensions ?? {});
+          setLoadedProfile(profile);
+          setExtensions(profile.extensions);
           setStructural(profile.structural_fields ?? {});
           setReferencingInferences(inferences.filter((inf) => inf.profile_id === Number(id)));
         }
@@ -148,13 +155,13 @@ export function ProfileEditPage({ mode }: { mode: "create" | "edit" }) {
     : plugins;
 
   useEffect(() => {
-    if (!form.enginePluginId) {
+    if (!form.pluginId) {
       setProfileSchema([]);
       return;
     }
     let cancelled = false;
     Promise.resolve()
-      .then(() => orchestratorApi.getPluginSchema(Number(form.enginePluginId)))
+      .then(() => orchestratorApi.getPluginSchema(Number(form.pluginId)))
       .then((schema) => {
         if (!cancelled) setProfileSchema(schema?.profile_schema ?? []);
       })
@@ -164,7 +171,7 @@ export function ProfileEditPage({ mode }: { mode: "create" | "edit" }) {
     return () => {
       cancelled = true;
     };
-  }, [form.enginePluginId]);
+  }, [form.pluginId]);
   const gpuIdList = useMemo(
     () =>
       form.gpuIds
@@ -191,8 +198,8 @@ export function ProfileEditPage({ mode }: { mode: "create" | "edit" }) {
     const payload = {
       name: form.name,
       model_id: Number(form.modelId),
-      engine_plugin_id: Number(form.enginePluginId),
-      plugin_version: plugins.find((p) => String(p.id) === form.enginePluginId)?.plugin_version ?? "",
+      plugin_id: Number(form.pluginId),
+      plugin_version: plugins.find((p) => String(p.id) === form.pluginId)?.plugin_version ?? "",
       schema_fields: [],
       gpu_ids: gpuIdList,
       port: form.port === "" ? null : Number(form.port),
@@ -247,6 +254,21 @@ export function ProfileEditPage({ mode }: { mode: "create" | "edit" }) {
     }
   }
 
+  const gpuPicker = useGpuChecklistItems(gpuIdList);
+  // Драйвер — поле схемы плагина (сейчас только у llama.cpp): показывается
+  // в «Параметры запуска», а не среди прочих полей движка.
+  const driverField = profileSchema.find((field) => field.name === "driver") ?? null;
+  const engineFields = profileSchema.filter((field) => field.name !== "driver");
+  const renderSchemaField = (field: FieldDescriptor) => (
+    <SchemaField
+      key={field.name}
+      field={field}
+      value={structural[field.name] ?? field.default ?? ""}
+      testId={`profile-field-${field.name}`}
+      onChange={(value) => setStructural((current) => ({ ...current, [field.name]: value }))}
+    />
+  );
+
   if (loading) return <p className="py-8 text-sm text-neutral-500 font-mono">Загрузка…</p>;
 
   return (
@@ -281,12 +303,12 @@ export function ProfileEditPage({ mode }: { mode: "create" | "edit" }) {
             testId="profile-model-link"
           />
           <label className="flex flex-col gap-1">
-            <span className={FIELD_LABEL}>Engine-плагин</span>
+            <span className={FIELD_LABEL}>Движок (engine-плагин)</span>
             <select
               className={FIELD_INPUT}
-              value={form.enginePluginId}
+              value={form.pluginId}
               onChange={(e) => {
-                setForm({ ...form, enginePluginId: e.currentTarget.value });
+                setForm({ ...form, pluginId: e.currentTarget.value });
                 // Расширения и поля схемы принадлежат плагину: выбор другого плагина их сбрасывает.
                 setExtensions({});
                 setStructural({});
@@ -298,41 +320,52 @@ export function ProfileEditPage({ mode }: { mode: "create" | "edit" }) {
               ))}
             </select>
           </label>
+          <PluginStampFields
+            pluginVersion={loadedProfile?.plugin_version ?? plugins.find((p) => String(p.id) === form.pluginId)?.plugin_version ?? ""}
+            schemaHash={loadedProfile?.schema_hash ?? ""}
+            needsReview={loadedProfile?.needs_review ?? false}
+          />
         </div>
       </section>
 
       <section className={SECTION_CARD}>
-        <h2 className={SECTION_TITLE}>Параметры запуска</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm mb-5">
-          <label className="flex flex-col gap-1">
-            <span className={FIELD_LABEL}>Карты (по умолчанию)</span>
-            <input className={FIELD_INPUT} placeholder="0,1" value={form.gpuIds} onChange={(e) => setForm({ ...form, gpuIds: e.currentTarget.value })} />
-          </label>
+        <h2 className={SECTION_TITLE}>
+          Параметры запуска
+          <EngineBadge pluginId={form.pluginId ? Number(form.pluginId) : null} />
+        </h2>
+        <div className="mb-5">
+          <span className={FIELD_LABEL}>Карты (по умолчанию)</span>
+          <div className="mt-2">
+            <GpuChecklist
+              items={gpuPicker.items}
+              selected={new Set(gpuIdList)}
+              onToggle={(gpuId) => setForm((f) => ({ ...f, gpuIds: toggleGpuId(gpuIdList, gpuId).join(",") }))}
+              nvmlError={gpuPicker.nvmlError}
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-5">
           <label className="flex flex-col gap-1">
             <span className={FIELD_LABEL}>Порт (TCP)</span>
             <input className={FIELD_INPUT} value={form.port} onChange={(e) => setForm({ ...form, port: e.currentTarget.value })} />
           </label>
-          <label className="flex flex-col gap-1">
-            <span className={FIELD_LABEL}>Драйвер</span>
-            <input className={FIELD_INPUT} value="nvidia (CUDA)" disabled />
-          </label>
+          {driverField && renderSchemaField(driverField)}
         </div>
 
-        <label className="flex flex-col gap-1 mb-2">
-          <span className={`${FIELD_LABEL} flex flex-wrap items-center gap-2`}>
-            Опции командной строки
-            <span className="text-neutral-700 normal-case font-normal">
-              — передаются в argv как есть, без схемы; стартовое содержимое предложено формулой (§8.1)
-            </span>
-          </span>
-          <textarea
-            className={`${FIELD_INPUT} h-44 leading-relaxed`}
-            spellCheck={false}
+        <div className="mb-2">
+          <ArgvEditor
             value={form.cliOptions}
-            onChange={(e) => setForm({ ...form, cliOptions: e.currentTarget.value })}
+            onChange={(value) => setForm((f) => ({ ...f, cliOptions: value }))}
+            testId="profile-argv"
+            label={
+              <>
+                Опции командной строки
+                <span className="text-neutral-700 normal-case font-normal">— стартовое содержимое предложено формулой (§8.1)</span>
+              </>
+            }
           />
-        </label>
-        <div className="text-[10px] text-neutral-600 font-mono mb-3">{CLI_HINT}</div>
+        </div>
+        <div className={`${FIELD_HINT} mb-3`}>{CLI_HINT}</div>
 
         <button onClick={applyFormula} disabled={!selectedModel} className="mb-5 px-4 py-2 border border-neutral-700 text-neutral-300 font-['Space_Grotesk'] text-xs font-bold uppercase hover:border-primary hover:text-primary disabled:opacity-40">
           Предложить параметры формулой
@@ -355,27 +388,37 @@ export function ProfileEditPage({ mode }: { mode: "create" | "edit" }) {
             onChange={(e) => setForm({ ...form, systemPrompt: e.currentTarget.value })}
           />
         </label>
+
+        <div className="mt-5">
+          <LaunchCommandField
+            label="Команда запуска"
+            hint="имя inference и порт подставляются при создании inference"
+            input={
+              form.modelId && form.pluginId
+                ? {
+                    plugin_id: Number(form.pluginId),
+                    model_id: Number(form.modelId),
+                    port: form.port === "" ? null : Number(form.port),
+                    gpu_ids: gpuIdList,
+                    structural_fields: structural,
+                    cli_options: form.cliOptions,
+                  }
+                : null
+            }
+            testId="profile-launch-command"
+          />
+        </div>
       </section>
 
-      {profileSchema.length > 0 && (
+      {engineFields.length > 0 && (
         <section className={SECTION_CARD} data-testid="profile-schema-fields">
           <h2 className={SECTION_TITLE}>Параметры движка</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            {profileSchema.map((field) => (
-              <SchemaField
-                key={field.name}
-                field={field}
-                value={structural[field.name] ?? field.default ?? ""}
-                testId={`profile-field-${field.name}`}
-                onChange={(value) => setStructural((current) => ({ ...current, [field.name]: value }))}
-              />
-            ))}
-          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">{engineFields.map(renderSchemaField)}</div>
         </section>
       )}
 
       <ProfileExtensionsSection
-        pluginId={form.enginePluginId ? Number(form.enginePluginId) : null}
+        pluginId={form.pluginId ? Number(form.pluginId) : null}
         value={extensions}
         onChange={setExtensions}
         fieldError={fieldError}

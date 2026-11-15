@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { orchestratorApi } from "../api/orchestrator";
 import type {
   ComposedStatus,
-  EngineInstallation,
+  PluginRecord,
   GpuStatusEntry,
   Inference,
   InferenceStatusLabel,
@@ -28,6 +28,7 @@ import {
 } from "../hooks/useMetricsSeries";
 import { STATUS_POLL_INTERVAL_MS, usePolling } from "../hooks/usePolling";
 import { toStandLoadValues, type StandLoadValues } from "../lib/standLoad";
+import { hasProfileDiscrepancy } from "../lib/discrepancy";
 
 const CHART_POLL_INTERVAL_MS = 5000;
 
@@ -35,7 +36,7 @@ interface Catalog {
   models: ModelEntity[];
   profiles: Profile[];
   providers: Provider[];
-  engineInstallations: EngineInstallation[];
+  plugins: PluginRecord[];
   gpuPool: number[];
   /** Общий объём RAM стенда — чтобы показывать занятую память в объёме,
    * а не только процентом (см. lib/standLoad.ts). */
@@ -48,11 +49,11 @@ function useCatalog(): Catalog | null {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [models, profiles, providers, engineInstallations, settings, hardware] = await Promise.all([
+      const [models, profiles, providers, plugins, settings, hardware] = await Promise.all([
         orchestratorApi.listModels(),
         orchestratorApi.listProfiles(),
         orchestratorApi.listProviders(),
-        orchestratorApi.listEngineInstallations(),
+        orchestratorApi.listPlugins(),
         orchestratorApi.getResourceSettings(),
         // Сбой телеметрии железа не должен ронять каталог: без объёма RAM
         // график останется в процентах (lib/standLoad.ts).
@@ -63,7 +64,7 @@ function useCatalog(): Catalog | null {
           models,
           profiles,
           providers,
-          engineInstallations,
+          plugins,
           gpuPool: settings.gpu_pool,
           ramTotalBytes: hardware?.ram?.total_bytes ?? null,
         });
@@ -317,27 +318,23 @@ export function DashboardPage() {
   const standScales = standLoadScales(hostLoad.samples, ramTotalBytes, hostLoad.windowMs);
   const profileById = new Map(catalog.profiles.map((p) => [p.id, p]));
   const providerById = new Map(catalog.providers.map((p) => [p.id, p]));
-  const installationById = new Map(catalog.engineInstallations.map((e) => [e.id, e]));
+  const pluginById = new Map(catalog.plugins.map((p) => [p.id, p]));
 
   const tiles: InferenceTileData[] = sortByRecentLaunch(live.inferences).map((inference) => {
     const model = modelById.get(inference.model_id);
     const profile = profileById.get(inference.profile_id);
     const provider = model ? providerById.get(model.provider_id) : undefined;
-    const installation = installationById.get(inference.engine_installation_id);
+    const plugin = pluginById.get(inference.plugin_id);
     const status = live.statuses[inference.id] ?? { status: "stopped" as InferenceStatusLabel, color: "gray", gpu_considered_free: true };
 
-    const hasDiscrepancy = profile
-      ? inference.cli_options !== profile.cli_options ||
-        inference.system_prompt !== profile.system_prompt ||
-        inference.port !== profile.port
-      : false;
+    const hasDiscrepancy = profile ? hasProfileDiscrepancy(inference, profile) : false;
 
     return {
       id: inference.id,
       name: inference.name,
       status,
       providerName: provider?.name ?? "—",
-      engineName: installation?.name ?? "—",
+      engineName: plugin?.name ?? "—",
       modelRef: model?.ref ?? "—",
       modelId: inference.model_id,
       modelUnusableReason:
@@ -360,7 +357,10 @@ export function DashboardPage() {
   // the GPU status about).
   const inferencesByGpu = (gpuId: number): GpuCardInference[] =>
     live.inferences
-      .filter((inference) => inference.gpu_ids.includes(gpuId))
+      .filter((inference) => {
+        const profile = profileById.get(inference.profile_id);
+        return (inference.gpu_ids ?? profile?.gpu_ids ?? []).includes(gpuId);
+      })
       .map((inference) => ({
         id: inference.id,
         name: inference.name,

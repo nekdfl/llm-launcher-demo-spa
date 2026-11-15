@@ -12,7 +12,7 @@ vi.mock("../api/orchestrator", () => ({
     listModels: vi.fn().mockResolvedValue([]),
     listProfiles: vi.fn().mockResolvedValue([]),
     listProviders: vi.fn().mockResolvedValue([]),
-    listEngineInstallations: vi.fn().mockResolvedValue([]),
+    listPlugins: vi.fn().mockResolvedValue([]),
     getResourceSettings: vi.fn().mockResolvedValue({
       cpu_pool: [],
       gpu_pool: [0, 1],

@@ -9,13 +9,11 @@ import type {
   DownloadStats,
   EngineExtension,
   ExtensionSelection,
-  EngineInstallation,
   GpuStatusEntry,
   GpuPowerHistoryPoint,
   HistorySettings,
   Inference,
   InferenceRun,
-  RunTraceEntry,
   ModelDeletionPreview,
   ModelDetailResponse,
   ModelEntity,
@@ -24,6 +22,8 @@ import type {
   RepoSyncReport,
   RepoSyncState,
   RepoUpdateResult,
+  LaunchCommandPreview,
+  LaunchCommandPreviewInput,
   Profile,
   ProfileFormulaSuggestion,
   PluginRecord,
@@ -83,17 +83,14 @@ export interface HostLoadSnapshot {
 export interface CreateInferenceInput {
   name: string;
   profile_id: number;
-  model_id: number;
-  engine_installation_id: number;
   port?: number;
   gpu_ids?: number[];
   structural_fields?: Record<string, unknown>;
   cli_options?: string;
   system_prompt?: string;
   autostart?: boolean;
-  reasoning?: boolean;
-  input_modalities?: string[];
-  trace?: boolean;
+  autostart_order?: number;
+  extensions?: ExtensionSelection;
 }
 
 export interface UpdateInferenceInput {
@@ -105,15 +102,14 @@ export interface UpdateInferenceInput {
   cli_options?: string;
   system_prompt?: string;
   autostart?: boolean;
-  reasoning?: boolean;
-  input_modalities?: string[];
-  trace?: boolean;
+  autostart_order?: number;
+  extensions?: ExtensionSelection;
 }
 
 export interface CreateProfileInput {
   name: string;
   model_id: number;
-  engine_plugin_id: number;
+  plugin_id: number;
   plugin_version: string;
   schema_fields: FieldDescriptor[];
   gpu_ids?: number[];
@@ -121,9 +117,6 @@ export interface CreateProfileInput {
   structural_fields?: Record<string, unknown>;
   cli_options?: string;
   system_prompt?: string;
-  reasoning?: boolean;
-  input_modalities?: string[];
-  trace?: boolean;
   extensions?: ExtensionSelection;
 }
 
@@ -136,6 +129,8 @@ export const orchestratorApi = {
   updateInference: (id: string, payload: UpdateInferenceInput) =>
     apiJson<Inference>(`${BASE}/inferences/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteInference: (id: string) => apiJson<void>(`${BASE}/inferences/${id}`, { method: "DELETE" }),
+  previewLaunchCommand: (payload: LaunchCommandPreviewInput) =>
+    apiJson<LaunchCommandPreview>(`${BASE}/launch-command/preview`, { method: "POST", body: JSON.stringify(payload) }),
 
   listModels: () => apiJson<ModelEntity[]>(`${BASE}/models`),
   getModel: (id: number) => apiJson<ModelEntity>(`${BASE}/models/${id}`),
@@ -155,18 +150,13 @@ export const orchestratorApi = {
     apiJson<Profile>(`${BASE}/profiles/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteProfile: (id: number) => apiJson<void>(`${BASE}/profiles/${id}`, { method: "DELETE" }),
 
-  listEngineInstallations: () => apiJson<EngineInstallation[]>(`${BASE}/engine-installations`),
-  getEngineInstallation: (id: number) => apiJson<EngineInstallation>(`${BASE}/engine-installations/${id}`),
-  createEngineInstallation: (payload: { name: string; plugin_id: number; install_fields: Record<string, unknown> }) =>
-    apiJson<EngineInstallation>(`${BASE}/engine-installations`, { method: "POST", body: JSON.stringify(payload) }),
-  recheckEngineInstallation: (id: number) =>
-    apiJson<EngineInstallation>(`${BASE}/engine-installations/${id}/recheck`, { method: "POST" }),
-  updateEngineInstallation: (
-    id: number,
-    payload: { name?: string; install_fields?: Record<string, unknown> }
-  ) => apiJson<EngineInstallation>(`${BASE}/engine-installations/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
-  deleteEngineInstallation: (id: number) =>
-    apiJson<void>(`${BASE}/engine-installations/${id}`, { method: "DELETE" }),
+  // Engine-плагин — вариант движка: новый вариант копирует код образца
+  // со своими install-полями.
+  createPluginVariant: (sourcePluginId: number, payload: { name: string; install_fields: Record<string, unknown> }) =>
+    apiJson<PluginRecord>(`${BASE}/plugins/${sourcePluginId}/variants`, { method: "POST", body: JSON.stringify(payload) }),
+  updatePlugin: (id: number, payload: { name?: string; install_fields?: Record<string, unknown> }) =>
+    apiJson<PluginRecord>(`${BASE}/plugins/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  recheckPlugin: (id: number) => apiJson<PluginRecord>(`${BASE}/plugins/${id}/recheck`, { method: "POST" }),
 
   listProviders: () => apiJson<Provider[]>(`${BASE}/providers`),
   getProvider: (id: number) => apiJson<Provider>(`${BASE}/providers/${id}`),
@@ -469,11 +459,6 @@ export const orchestratorApi = {
     const text = await apiText(`${BASE}/history/runs/${runId}/log?lines=${lines}`);
     return text === "" ? [] : text.split("\n");
   },
-  // Сохранённые запросы запуска (trace) — отдельно от журнала процесса:
-  // движок тел не пишет, их сохраняет роутер.
-  getRunTrace: (runId: number, entries = 20) =>
-    apiJson<RunTraceEntry[]>(`${BASE}/history/runs/${runId}/trace?entries=${entries}`),
-
   // Audit log (audit-log-middleware)
   listAuditLog: (limit = 100) => apiJson<Record<string, unknown>[]>(`${BASE}/audit-log?limit=${limit}`),
   getAuditSettings: () => apiJson<{ max_records: number }>(`${BASE}/audit-log/settings`),

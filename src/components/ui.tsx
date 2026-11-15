@@ -5,20 +5,42 @@ import { Link } from "react-router-dom";
  * strings are carried over verbatim from the reference mockups so every
  * section renders as the same design system, not a re-interpretation. */
 
-export const FIELD_LABEL = "text-[11px] text-neutral-500 uppercase font-['Space_Grotesk']";
-export const FIELD_INPUT = "bg-surface-container border border-neutral-800 px-3 py-2 font-mono text-xs";
+export const FIELD_LABEL = "text-[11px] text-neutral-400 uppercase tracking-wider font-['Space_Grotesk']";
+export const FIELD_INPUT =
+  "bg-surface-container-lowest border border-neutral-800 px-3 py-2 font-mono text-xs text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:border-primary disabled:opacity-50";
+/** Поле ключевого значения: ключ флага, имя, slug. */
+export const FIELD_INPUT_ACCENT = `${FIELD_INPUT} !text-primary font-semibold`;
+/** Унаследованное значение (inference ← профиль): выглядит как поле только
+ * для чтения, но ввод в него переопределяет параметр. Состояние, а не стиль. */
+export const INHERITED_FIELD =
+  "bg-surface-container-lowest border border-dashed border-neutral-800 px-3 py-2 font-mono text-xs text-neutral-500 focus:outline-none focus:border-primary";
+export const FIELD_HINT = "text-[10px] font-mono text-neutral-600";
 
 export const SECTION_CARD = "bg-surface-container-lowest tactical-accent p-6 mb-6";
-export const SECTION_TITLE = "font-['Space_Grotesk'] text-xs font-bold uppercase tracking-widest text-primary mb-4";
+export const SECTION_TITLE =
+  "font-['Space_Grotesk'] text-xs font-bold uppercase tracking-widest text-primary mb-4 flex flex-wrap items-center gap-2 before:content-['●'] before:text-[8px]";
+/** Под-панель внутри секции (сырая строка опций, группа полей). */
+export const PANEL = "border border-neutral-800 bg-surface-container/60 p-3";
 
 export const PRIMARY_BUTTON =
   "px-4 py-2 bg-primary text-black font-['Space_Grotesk'] text-xs font-bold uppercase hover:bg-primary/80 disabled:opacity-50";
 export const GHOST_BUTTON =
-  "px-4 py-2 border border-neutral-700 text-neutral-300 font-['Space_Grotesk'] text-xs font-bold uppercase hover:border-neutral-500";
+  "px-4 py-2 border border-neutral-700 text-neutral-300 font-['Space_Grotesk'] text-xs font-bold uppercase hover:border-primary hover:text-primary disabled:opacity-40 disabled:hover:border-neutral-700 disabled:hover:text-neutral-300";
 export const DANGER_BUTTON =
   "flex items-center gap-2 px-4 py-2 border border-danger/50 text-danger font-['Space_Grotesk'] text-xs font-bold uppercase hover:bg-danger hover:text-black transition-all";
 export const SMALL_BUTTON =
-  "text-[10px] font-['Space_Grotesk'] uppercase text-neutral-400 border border-neutral-700 px-3 py-1.5 hover:border-primary hover:text-primary";
+  "text-[10px] font-['Space_Grotesk'] uppercase text-neutral-400 border border-neutral-700 px-3 py-1.5 hover:border-primary hover:text-primary disabled:opacity-40";
+/** Кнопка инструмента внутри панели: «Копировать», «Очистить». */
+export const TOOL_BUTTON =
+  "text-[11px] font-mono text-neutral-400 border border-neutral-800 px-2.5 py-1 hover:border-primary hover:text-primary disabled:opacity-40 disabled:hover:border-neutral-800 disabled:hover:text-neutral-400";
+
+/** Плитка выбора (карты, inference роутера, расширения, ядра CPU). */
+export const SELECT_TILE = "border border-neutral-800 bg-surface-container/60 hover:border-neutral-700 cursor-pointer transition-colors";
+export const SELECT_TILE_ON = "border border-primary bg-primary/5 cursor-pointer transition-colors";
+export const selectTile = (selected: boolean) => (selected ? SELECT_TILE_ON : SELECT_TILE);
+/** Подпись элемента в плитке. */
+export const selectTileLabel = (selected: boolean) => (selected ? "text-primary font-bold" : "text-neutral-300");
+export const CHECKBOX = "accent-primary";
 
 /** Status badge colors, mirroring the tactical-accent palette. */
 export type BadgeTone = "primary" | "warn" | "danger" | "neutral";

@@ -41,31 +41,18 @@ export interface Profile {
   model_validity?: ModelValidity;
   name: string;
   model_id: number;
-  engine_plugin_id: number;
+  /** Engine-плагин — конкретный вариант движка. */
+  plugin_id: number;
   gpu_ids: number[];
   port: number | null;
   structural_fields: Record<string, unknown>;
   cli_options: string;
   system_prompt: string;
-  /** Признаки, которые движок не сообщает: задаются человеком и
-   * наследуются создаваемыми inference. */
-  reasoning: boolean;
-  input_modalities: string[];
   plugin_version: string;
   schema_hash: string;
   origin_profile_id: number | null;
   needs_review: boolean;
-  extensions?: ExtensionSelection;
-}
-
-export interface EngineInstallation {
-  id: number;
-  name: string;
-  plugin_id: number;
-  install_fields: Record<string, unknown>;
-  version: string | null;
-  available: boolean;
-  unavailable_reason: string | null;
+  extensions: ExtensionSelection;
 }
 
 export interface Inference {
@@ -74,29 +61,48 @@ export interface Inference {
   name: string;
   profile_id: number;
   model_id: number;
-  engine_installation_id: number;
+  /** Плагин профиля: движок inference не выбирает отдельно. */
+  plugin_id: number;
+  /** Параметры запуска всегда хранят значение. Совпадение с профилем
+   * показывается как «из профиля», расхождение — как переопределение. */
   gpu_ids: number[];
   port: number;
   structural_fields: Record<string, unknown>;
   cli_options: string;
   system_prompt: string;
   autostart: boolean;
-  /** Уходят в `GET /v1/models` роутера: движок эти признаки не знает. */
-  reasoning: boolean;
-  input_modalities: string[];
+  autostart_order: number;
+  extensions: ExtensionSelection;
+  plugin_version: string;
+  schema_hash: string;
+  needs_review: boolean;
   /** Годность модели этого inference — унаследована по `model_id`. */
   model_validity?: ModelValidity;
   /** Последний запуск этого inference: время старта задаёт порядок плиток на
    * Dashboard, пики — их содержимое. `null` — ни разу не запускался либо
    * значение не было снято (`0` значил бы снятый ноль). */
-  /** Опция trace: журнал запуска содержит входящие и исходящие запросы.
-   * Применяется при следующем запуске — подробность журналирования задаётся
-   * аргументом процесса. */
-  trace: boolean;
-  extensions?: ExtensionSelection;
   last_started_at: string | null;
   last_run_peak_vram_bytes: number | null;
   last_run_peak_ram_bytes: number | null;
+}
+
+/** Превью команды процесса движка: argv с исполняемым файлом варианта движка и
+ * окружение, как их построит `build_command` / `build_env` плагина. */
+export interface LaunchCommandPreview {
+  argv: string[];
+  env: Record<string, string>;
+  command: string;
+  plugin_name: string;
+}
+
+export interface LaunchCommandPreviewInput {
+  plugin_id: number;
+  model_id: number;
+  inference_name?: string | null;
+  port?: number | null;
+  gpu_ids: number[];
+  structural_fields: Record<string, unknown>;
+  cli_options: string;
 }
 
 export type InferenceStatusLabel = "stopped" | "warming" | "running" | "unresponsive" | "failed";
@@ -220,8 +226,8 @@ export interface InferenceRun {
   id: number;
   inference_id: string;
   profile_id: number;
-  engine_installation_id: number;
-  engine_installation_version: string | null;
+  plugin_id: number;
+  engine_version: string | null;
   gpu_ids: number[];
   port: number;
   started_at: string;
@@ -249,6 +255,12 @@ export interface PluginRecord {
   tasks: string[];
   /** Форматы моделей, которые запускает движок. */
   model_formats?: string[];
+  /** Engine-плагин — вариант движка: install-поля, версия движка и
+   * доступность. У provider пусто. */
+  install_fields: Record<string, unknown>;
+  engine_version: string | null;
+  available: boolean;
+  unavailable_reason: string | null;
 }
 
 /** Расширение engine-плагина (словари речевых движков). */
@@ -387,7 +399,7 @@ export interface ModelDetailResponse {
   local_bytes: number;
   /** `null` — формат, которого оркестратор не знает. */
   repo_format: "gguf" | "safetensors" | "ninfer" | null;
-  /** Доступные установки движков, объявляющих формат репозитория. */
+  /** Доступные варианты движков (engine-плагины), объявляющих формат репозитория. */
   supporting_engines: { id: number; name: string }[];
 }
 
@@ -454,9 +466,3 @@ export interface HistorySettings {
   max_log_files: number;
 }
 
-/** Одна сохранённая пара «запрос — ответ» запуска (опция trace). */
-export interface RunTraceEntry {
-  at: string;
-  request: unknown;
-  response: unknown;
-}
