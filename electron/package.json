@@ -1,7 +1,7 @@
 {
   "name": "llm-launcher-reference",
   "productName": "LLM Launcher Reference",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Функциональная копия SPA LLM Launcher с эмуляцией backend'а",
   "author": "nekdfl",
   "private": true,
