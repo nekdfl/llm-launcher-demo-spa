@@ -3,10 +3,17 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../api/client";
 import { orchestratorApi } from "../api/orchestrator";
-import type { EngineInstallation, HardwareInfo, Inference, InferenceRun, ModelEntity, Profile, RunTraceEntry } from "../api/types";
+import type { FieldDescriptor } from "../api/orchestrator";
+import type { Inference, InferenceRun, ModelEntity, PluginRecord, Profile } from "../api/types";
+import { EngineBadge } from "../components/EngineBadge";
 import { EntityLink } from "../components/EntityLink";
 import { DiscrepancyIcon } from "../components/DiscrepancyIcon";
-import { GpuChecklist, type GpuChecklistItem } from "../components/GpuChecklist";
+import { ArgvEditor } from "../components/ArgvEditor";
+import { INHERITED_BLOCK, InheritanceMark } from "../components/InheritanceMark";
+import { PluginStampFields } from "../components/PluginStampFields";
+import { SchemaField } from "../components/SchemaField";
+import { ProfileExtensionsSection } from "./profiles/ProfileExtensionsSection";
+import { GpuChecklist, toggleGpuId, useGpuChecklistItems } from "../components/GpuChecklist";
 import { MetricsRangePicker } from "../components/MetricsRangePicker";
 import { ThroughputChart } from "../components/ThroughputChart";
 import { STATUS_POLL_INTERVAL_MS, usePolling } from "../hooks/usePolling";
@@ -18,45 +25,46 @@ import {
   useMetricsSeries,
   type MetricsRangeKey,
 } from "../hooks/useMetricsSeries";
+import { LaunchCommandField } from "../components/LaunchCommandField";
 import { hasProfileDiscrepancy } from "../lib/discrepancy";
+import {
+  isOverridden,
+  PROFILE_PARITY_KEYS,
+  profileParityValues,
+  structuralFieldOverridden,
+  type ProfileParityKey,
+  type ProfileParityValues,
+} from "../lib/launchParams";
 import { formatBytes } from "../lib/formatBytes";
 import { statusLineClass } from "../lib/status";
+import { CHECKBOX, FIELD_HINT, FIELD_INPUT, FIELD_LABEL, INHERITED_FIELD, SECTION_TITLE } from "../components/ui";
 
 const CHART_POLL_INTERVAL_MS = 5000;
 
-const FIELD_LABEL = "text-[11px] text-neutral-500 uppercase font-['Space_Grotesk']";
-const FIELD_INPUT = "bg-surface-container border border-neutral-800 px-3 py-2 font-mono text-xs";
-// Модальности ввода, которые понимает OpenAI-совместимый клиент.
-const MODALITIES = ["text", "image", "audio"] as const;
-
-interface ParamsForm {
+/** Форма карточки: параметры, общие с профилем, хранятся в его же виде —
+ * «из профиля» или «переопределено» выводится сравнением, а не флагами. */
+interface ParamsForm extends ProfileParityValues {
   name: string;
   slug: string;
-  gpuIds: number[];
   port: string;
-  driver: string;
-  cliOptions: string;
-  systemPrompt: string;
   autostart: boolean;
-  reasoning: boolean;
-  trace: boolean;
-  inputModalities: string[];
+  autostartOrder: string;
 }
 
 function toForm(inference: Inference): ParamsForm {
+  const params = Object.fromEntries(PROFILE_PARITY_KEYS.map((key) => [key, structuredClone(inference[key])])) as ProfileParityValues;
   return {
+    ...params,
     name: inference.name,
     slug: inference.slug,
-    gpuIds: [...inference.gpu_ids],
     port: String(inference.port),
-    driver: String(inference.structural_fields.driver ?? "cpu"),
-    cliOptions: inference.cli_options,
-    systemPrompt: inference.system_prompt,
     autostart: inference.autostart,
-    reasoning: inference.reasoning,
-    trace: inference.trace,
-    inputModalities: [...inference.input_modalities],
+    autostartOrder: String(inference.autostart_order),
   };
+}
+
+function fieldClass(overridden: boolean): string {
+  return overridden ? FIELD_INPUT : INHERITED_FIELD;
 }
 
 const RUN_OUTCOME_LABELS: Record<string, string> = {
@@ -79,7 +87,8 @@ export function InferenceDetailPage() {
   const [inference, setInference] = useState<Inference | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [model, setModel] = useState<ModelEntity | null>(null);
-  const [installation, setInstallation] = useState<EngineInstallation | null>(null);
+  const [plugin, setPlugin] = useState<PluginRecord | null>(null);
+  const [profileSchema, setProfileSchema] = useState<FieldDescriptor[]>([]);
   const [runs, setRuns] = useState<InferenceRun[]>([]);
   const [form, setForm] = useState<ParamsForm | null>(null);
   const [newProfileName, setNewProfileName] = useState("");
@@ -95,25 +104,22 @@ export function InferenceDetailPage() {
   const [actionBusy, setActionBusy] = useState<null | "start" | "stop" | "restart">(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  // Card picking mirrors /settings/cpu-gpu: the pool says what may be
-  // chosen, hardware-info gives the names and metrics.
-  const [hardware, setHardware] = useState<HardwareInfo | null>(null);
-  const [gpuPool, setGpuPool] = useState<number[] | null>(null);
 
   const loadAll = async () => {
     const inf = await orchestratorApi.getInference(inferenceId);
-    setInference(inf);
-    setForm((prev) => prev ?? toForm(inf));
-
-    const [prof, mdl, inst, runHistory] = await Promise.all([
+    const [prof, mdl, plugins, schema, runHistory] = await Promise.all([
       orchestratorApi.getProfile(inf.profile_id),
       orchestratorApi.getModel(inf.model_id),
-      orchestratorApi.getEngineInstallation(inf.engine_installation_id),
+      orchestratorApi.listPlugins(),
+      orchestratorApi.getPluginSchema(inf.plugin_id).catch(() => null),
       orchestratorApi.listRunsForInference(inf.id),
     ]);
+    setInference(inf);
+    setForm((prev) => prev ?? toForm(inf));
     setProfile(prof);
     setModel(mdl);
-    setInstallation(inst);
+    setPlugin(plugins.find((item) => item.id === inf.plugin_id) ?? null);
+    setProfileSchema(schema?.profile_schema ?? []);
     setRuns(runHistory);
   };
 
@@ -122,16 +128,6 @@ export function InferenceDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inferenceId]);
 
-  useEffect(() => {
-    orchestratorApi
-      .getHardwareInfo()
-      .then(setHardware)
-      .catch(() => setHardware(null));
-    orchestratorApi
-      .getResourceSettings()
-      .then((settings) => setGpuPool(settings.gpu_pool))
-      .catch(() => setGpuPool(null));
-  }, []);
 
   const { data: status } = usePolling(
     () => orchestratorApi.getInferenceStatus(inferenceId),
@@ -172,70 +168,70 @@ export function InferenceDetailPage() {
   // уже грузит для истории — берём его же, завершённые.
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [archivedLogLines, setArchivedLogLines] = useState<string[]>([]);
-  const [traceEntries, setTraceEntries] = useState<RunTraceEntry[]>([]);
   const finishedRuns = runs.filter((run) => run.outcome !== null);
 
   useEffect(() => {
     if (selectedRunId === null) {
       setArchivedLogLines([]);
-      setTraceEntries([]);
       return;
     }
     orchestratorApi
       .getRunLog(selectedRunId)
       .then(setArchivedLogLines)
       .catch(() => setArchivedLogLines([]));
-    orchestratorApi
-      .getRunTrace(selectedRunId)
-      .then(setTraceEntries)
-      .catch(() => setTraceEntries([]));
   }, [selectedRunId]);
 
   const liveLogLines = useInferenceLogs(selectedRunId === null ? inferenceId || null : null);
   const shownLogLines = selectedRunId === null ? liveLogLines : archivedLogLines;
 
-  if (!inference || !form) {
+  const gpuPicker = useGpuChecklistItems(form?.gpu_ids ?? []);
+
+  if (!inference || !form || !profile) {
     return <div className="py-8 text-sm text-neutral-500 font-mono">Загрузка…</div>;
   }
 
-  const diverged = profile ? hasProfileDiscrepancy(inference, profile) : false;
+  const diverged = hasProfileDiscrepancy(inference, profile);
+  const profileValues = profileParityValues(profile);
 
   const updateField = <K extends keyof ParamsForm>(key: K, value: ParamsForm[K]) =>
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
 
-  const toggleGpu = (gpuId: number) =>
-    setForm((prev) =>
-      prev
-        ? {
-            ...prev,
-            gpuIds: prev.gpuIds.includes(gpuId)
-              ? prev.gpuIds.filter((id) => id !== gpuId)
-              : [...prev.gpuIds, gpuId].sort((left, right) => left - right),
-          }
-        : prev
-    );
+  const overridden = (key: ProfileParityKey) => isOverridden(key, form[key], profileValues[key]);
+  const resetToProfile = (key: ProfileParityKey) => updateField(key, structuredClone(profileValues[key]));
+  const mark = (key: ProfileParityKey) => (
+    <InheritanceMark overridden={overridden(key)} onReset={() => resetToProfile(key)} testId={`inherit-${key.replace(/_/g, "-")}`} />
+  );
 
-  // Only pool cards are offered, so a card outside the pool cannot be
-  // picked here. A card already assigned to this inference but since dropped
-  // from the pool stays listed and marked — otherwise saving the form would
-  // silently erase an existing assignment.
-  const detectedGpuById = new Map((hardware?.gpus ?? []).map((gpu) => [gpu.gpu_id, gpu]));
-  const poolGpuIds = gpuPool ?? [];
-  const gpuChecklistItems: GpuChecklistItem[] = [
-    ...poolGpuIds,
-    ...form.gpuIds.filter((gpuId) => !poolGpuIds.includes(gpuId)),
-  ]
-    .sort((left, right) => left - right)
-    .map((gpuId) => {
-      const detected = detectedGpuById.get(gpuId);
-      return {
-        gpu_id: gpuId,
-        name: detected?.name ?? null,
-        used_bytes: detected?.used_bytes ?? null,
-        total_bytes: detected?.total_bytes ?? null,
-        outOfPool: gpuPool !== null && !poolGpuIds.includes(gpuId),
-      };
-    });
+  const toggleGpu = (gpuId: number) => updateField("gpu_ids", toggleGpuId(form.gpu_ids, gpuId));
+
+  // Поля схемы сравниваются с профилем по отдельности: изменённый драйвер не
+  // делает переопределёнными остальные поля.
+  const setStructuralField = (name: string, value: unknown) =>
+    updateField("structural_fields", { ...form.structural_fields, [name]: value });
+  const resetStructuralField = (name: string) => {
+    const next = { ...form.structural_fields };
+    if (name in profileValues.structural_fields) next[name] = structuredClone(profileValues.structural_fields[name]);
+    else delete next[name];
+    updateField("structural_fields", next);
+  };
+  const driverField = profileSchema.find((field) => field.name === "driver") ?? null;
+  const engineFields = profileSchema.filter((field) => field.name !== "driver");
+  const renderSchemaField = (field: FieldDescriptor) => {
+    const fieldOverridden = structuralFieldOverridden(form.structural_fields, profileValues.structural_fields, field.name);
+    return (
+      <SchemaField
+        key={field.name}
+        field={field}
+        value={form.structural_fields[field.name] ?? field.default ?? ""}
+        testId={`inference-field-${field.name}`}
+        dimmed={!fieldOverridden}
+        labelExtra={
+          <InheritanceMark overridden={fieldOverridden} onReset={() => resetStructuralField(field.name)} testId={`inherit-field-${field.name}`} />
+        }
+        onChange={(value) => setStructuralField(field.name, value)}
+      />
+    );
+  };
 
   const handleSave = async () => {
     setError(null);
@@ -246,14 +242,13 @@ export function InferenceDetailPage() {
         name: form.name,
         slug: form.slug,
         port: Number(form.port),
-        gpu_ids: form.gpuIds,
-        structural_fields: { ...inference.structural_fields, driver: form.driver },
-        cli_options: form.cliOptions,
-        system_prompt: form.systemPrompt,
+        gpu_ids: form.gpu_ids,
+        structural_fields: form.structural_fields,
+        cli_options: form.cli_options,
+        system_prompt: form.system_prompt,
         autostart: form.autostart,
-        reasoning: form.reasoning,
-        trace: form.trace,
-        input_modalities: form.inputModalities,
+        autostart_order: Number(form.autostartOrder) || 0,
+        extensions: form.extensions,
       });
       setInference(updated);
       setMessage("Сохранено — изменения применятся при следующем запуске");
@@ -265,24 +260,21 @@ export function InferenceDetailPage() {
   };
 
   const handleSaveAsProfile = async () => {
-    if (!installation || !newProfileName.trim()) return;
+    if (!newProfileName.trim()) return;
     setError(null);
     try {
-      const schema = await orchestratorApi.getPluginSchema(installation.plugin_id);
       await orchestratorApi.createProfile({
         name: newProfileName.trim(),
         model_id: inference.model_id,
-        engine_plugin_id: installation.plugin_id,
-        plugin_version: installation.version ?? "",
-        schema_fields: schema.profile_schema,
-        gpu_ids: form.gpuIds,
+        plugin_id: inference.plugin_id,
+        plugin_version: inference.plugin_version,
+        schema_fields: profileSchema,
         port: Number(form.port),
-        structural_fields: { ...inference.structural_fields, driver: form.driver },
-        cli_options: form.cliOptions,
-        system_prompt: form.systemPrompt,
-        reasoning: form.reasoning,
-        trace: form.trace,
-        input_modalities: form.inputModalities,
+        gpu_ids: form.gpu_ids,
+        structural_fields: form.structural_fields,
+        cli_options: form.cli_options,
+        system_prompt: form.system_prompt,
+        extensions: form.extensions,
       });
       setShowSaveAsProfile(false);
       setNewProfileName("");
@@ -425,7 +417,7 @@ export function InferenceDetailPage() {
       </header>
 
       <section className="bg-surface-container-lowest tactical-accent p-6 mb-6">
-        <h2 className="font-['Space_Grotesk'] text-xs font-bold uppercase tracking-widest text-primary mb-4">Источник</h2>
+        <h2 className={SECTION_TITLE}>Источник</h2>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
           <label className="flex flex-col gap-1">
             <span className={FIELD_LABEL}>Имя</span>
@@ -451,30 +443,38 @@ export function InferenceDetailPage() {
             missingNote="профиль не найден"
             testId="inference-profile-link"
           />
+          {/* Движок — плагин профиля: inference его отдельно не выбирает. */}
           <EntityLink
-            label="Установка движка"
-            name={installation?.name}
-            to={installation ? `/engines/${installation.id}` : null}
-            missingNote="установка не найдена"
-            testId="inference-installation-link"
+            label="Движок"
+            name={plugin?.name}
+            to={plugin ? `/engines/${plugin.id}` : null}
+            missingNote="движок не найден"
+            testId="inference-plugin-link"
           />
+          <PluginStampFields pluginVersion={inference.plugin_version} schemaHash={inference.schema_hash} needsReview={inference.needs_review} />
         </div>
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <section className="lg:col-span-2 bg-surface-container-lowest tactical-accent p-6">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="font-['Space_Grotesk'] text-xs font-bold uppercase tracking-widest text-primary">Параметры запуска</h2>
+            <h2 className={`${SECTION_TITLE} !mb-0`}>
+              Параметры запуска
+              <EngineBadge pluginId={inference.plugin_id} />
+            </h2>
             <span className="text-[10px] text-warn font-mono uppercase">правки применяются при следующем запуске</span>
           </div>
           <div className="mb-5">
-            <span className={FIELD_LABEL}>Карты</span>
-            <div className="mt-2">
+            <span className={`${FIELD_LABEL} flex flex-wrap items-center gap-2`}>
+              Карты
+              {mark("gpu_ids")}
+            </span>
+            <div className={`mt-2 ${overridden("gpu_ids") ? "" : INHERITED_BLOCK}`}>
               <GpuChecklist
-                items={gpuChecklistItems}
-                selected={new Set(form.gpuIds)}
+                items={gpuPicker.items}
+                selected={new Set(form.gpu_ids)}
                 onToggle={toggleGpu}
-                nvmlError={hardware?.nvml_error ?? null}
+                nvmlError={gpuPicker.nvmlError}
               />
             </div>
           </div>
@@ -483,82 +483,93 @@ export function InferenceDetailPage() {
               <span className={FIELD_LABEL}>Порт (TCP)</span>
               <input className={FIELD_INPUT} value={form.port} onChange={(e) => updateField("port", e.currentTarget.value)} />
             </label>
-            <label className="flex flex-col gap-1">
-              <span className={FIELD_LABEL}>Драйвер</span>
-              <select className={FIELD_INPUT} value={form.driver} onChange={(e) => updateField("driver", e.currentTarget.value)}>
-                <option value="nvidia">nvidia (CUDA)</option>
-                <option value="cpu">cpu</option>
-                <option value="rocm">rocm</option>
-              </select>
-            </label>
+            {driverField && renderSchemaField(driverField)}
           </div>
 
-          <label className="flex flex-col gap-1 mb-2">
+          <div className="mb-2">
+            <ArgvEditor
+              value={form.cli_options}
+              onChange={(value) => updateField("cli_options", value)}
+              inherited={!overridden("cli_options")}
+              testId="inference-argv"
+              label={
+                <>
+                  Опции командной строки
+                  {mark("cli_options")}
+                </>
+              }
+            />
+          </div>
+          <div className={`${FIELD_HINT} mb-5`}>
+            -m, --alias, --host и --port ядро подставляет само из модели, имени и поля «Порт» выше — остальное передаётся в argv как записано.
+          </div>
+
+          <div className="flex flex-col gap-4 mb-5">
+            <LaunchCommandField
+              label="Команда запуска профиль"
+              hint="та же, что в карточке профиля"
+              input={{
+                plugin_id: profile.plugin_id,
+                model_id: profile.model_id,
+                port: profile.port,
+                gpu_ids: profile.gpu_ids,
+                structural_fields: profile.structural_fields,
+                cli_options: profile.cli_options,
+              }}
+              testId="inference-profile-launch-command"
+            />
+            <LaunchCommandField
+              label="Команда запуска текущая"
+              hint="с переопределениями и несохранёнными правками"
+              input={{
+                plugin_id: inference.plugin_id,
+                model_id: inference.model_id,
+                inference_name: form.name,
+                port: Number(form.port) || null,
+                gpu_ids: form.gpu_ids,
+                structural_fields: form.structural_fields,
+                cli_options: form.cli_options,
+              }}
+              testId="inference-current-launch-command"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1">
             <span className={`${FIELD_LABEL} flex flex-wrap items-center gap-2`}>
-              Опции командной строки
-              <span className="text-neutral-700 normal-case font-normal">— передаются в argv как есть, без схемы</span>
+              System prompt
+              {mark("system_prompt")}
+              <span className="text-neutral-700 normal-case font-normal">— вставляется роутером в начало каждого запроса</span>
             </span>
             <textarea
-              className={`${FIELD_INPUT} h-32 leading-relaxed`}
-              spellCheck={false}
-              value={form.cliOptions}
-              onChange={(e) => updateField("cliOptions", e.currentTarget.value)}
+              aria-label="System prompt"
+              className={`${fieldClass(overridden("system_prompt"))} h-16`}
+              value={form.system_prompt}
+              onChange={(e) => updateField("system_prompt", e.currentTarget.value)}
             />
-          </label>
-          <div className="text-[10px] text-neutral-600 font-mono mb-5">
-            -m, --alias, --host и --port ядро подставляет само из модели, имени и поля «Порт» выше — остальное свободный текст.
           </div>
 
-          <label className="flex flex-col gap-1">
-            <span className={FIELD_LABEL}>
-              System prompt <span className="text-neutral-700 normal-case font-normal">— вставляется роутером в начало каждого запроса</span>
-            </span>
-            <textarea
-              className={`${FIELD_INPUT} h-16`}
-              value={form.systemPrompt}
-              onChange={(e) => updateField("systemPrompt", e.currentTarget.value)}
-            />
-          </label>
-
-          <div className="flex flex-col gap-2 mt-5 pt-4 border-t border-neutral-900">
-            <span className={FIELD_LABEL}>
-              Возможности <span className="text-neutral-700 normal-case font-normal">— уходят клиентам в <code>/v1/models</code>; движок их не сообщает</span>
-            </span>
-            <div className="flex items-center gap-6">
-              <label className="flex items-center gap-2 text-xs text-neutral-400 uppercase font-['Space_Grotesk']">
-                <input
-                  type="checkbox"
-                  className="accent-primary"
-                  checked={form.reasoning}
-                  onChange={(e) => updateField("reasoning", e.currentTarget.checked)}
-                />
-                Reasoning
-              </label>
-              {MODALITIES.map((modality) => (
-                <label key={modality} className="flex items-center gap-2 text-xs text-neutral-400 uppercase font-['Space_Grotesk']">
-                  <input
-                    type="checkbox"
-                    className="accent-primary"
-                    checked={form.inputModalities.includes(modality)}
-                    onChange={(e) =>
-                      updateField(
-                        "inputModalities",
-                        e.currentTarget.checked
-                          ? [...form.inputModalities, modality]
-                          : form.inputModalities.filter((item) => item !== modality),
-                      )
-                    }
-                  />
-                  {modality}
-                </label>
-              ))}
+          {engineFields.length > 0 && (
+            <div className="mt-5 pt-4 border-t border-neutral-900" data-testid="inference-schema-fields">
+              <span className={FIELD_LABEL}>Параметры движка</span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mt-2">{engineFields.map(renderSchemaField)}</div>
             </div>
-          </div>
+          )}
 
           <div className="flex items-center gap-6 mt-5 pt-4 border-t border-neutral-900">
             <label className="flex items-center gap-2 text-xs text-neutral-400 uppercase font-['Space_Grotesk']">
-              <input type="checkbox" className="accent-primary" checked={form.autostart} onChange={(e) => updateField("autostart", e.currentTarget.checked)} />
+              <input type="checkbox" className={CHECKBOX} checked={form.autostart} onChange={(e) => updateField("autostart", e.currentTarget.checked)} />
               Автозапуск
+            </label>
+            <label className="flex items-center gap-2 text-xs text-neutral-400 uppercase font-['Space_Grotesk']">
+              Порядок
+              <input
+                type="number"
+                min={0}
+                className={`${FIELD_INPUT} w-20 !py-1`}
+                value={form.autostartOrder}
+                onChange={(e) => updateField("autostartOrder", e.currentTarget.value)}
+                data-testid="autostart-order"
+              />
             </label>
             <div className="flex-grow" />
             {showSaveAsProfile ? (
@@ -598,7 +609,7 @@ export function InferenceDetailPage() {
         </section>
 
         <section className="bg-surface-container-lowest p-6 flex flex-col gap-4">
-          <h2 className="font-['Space_Grotesk'] text-xs font-bold uppercase tracking-widest text-primary">Потребление</h2>
+          <h2 className={`${SECTION_TITLE} !mb-0`}>Потребление</h2>
           <div className="grid grid-cols-2 gap-3 text-[11px] font-mono">
             <div className="bg-surface-container p-3">
               <div className="text-neutral-500 uppercase">VRAM peak</div>
@@ -664,10 +675,20 @@ export function InferenceDetailPage() {
         </section>
       </div>
 
+      {/* Расширения — отдельной карточкой, как в профиле. */}
+      <div className="h-6" />
+      <ProfileExtensionsSection
+        pluginId={inference.plugin_id}
+        value={form.extensions}
+        onChange={(value) => updateField("extensions", value)}
+        fieldError={null}
+        profileValue={profileValues.extensions}
+      />
+
       <SpeechConsole inferenceId={inference.id} running={isRunning} />
 
       <section className="mt-6 bg-surface-container-lowest p-6">
-        <h2 className="font-['Space_Grotesk'] text-xs font-bold uppercase tracking-widest text-primary mb-4">История запусков</h2>
+        <h2 className={SECTION_TITLE}>История запусков</h2>
         <table className="w-full text-xs font-mono">
           <thead>
             <tr className="text-neutral-500 uppercase text-[10px] border-b border-neutral-800">
@@ -702,7 +723,7 @@ export function InferenceDetailPage() {
 
       <section className="mt-6 bg-surface-container-lowest p-6">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="font-['Space_Grotesk'] text-xs font-bold uppercase tracking-widest text-primary">Пропускная способность</h2>
+          <h2 className={`${SECTION_TITLE} !mb-0`}>Пропускная способность</h2>
           <MetricsRangePicker value={metricsRange} onChange={changeMetricsRange} testId="metrics-range" />
         </div>
         <div className="flex items-center gap-4 text-[10px] font-mono text-neutral-500 mb-2">
@@ -720,25 +741,15 @@ export function InferenceDetailPage() {
 
       <section className="mt-6 bg-surface-container-lowest tactical-accent p-6">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-          <h2 className="font-['Space_Grotesk'] text-xs font-bold uppercase tracking-widest text-primary">
+          <h2 className={`${SECTION_TITLE} !mb-0`}>
             Журнал{" "}
             <span className="text-neutral-600 normal-case font-normal">
               {selectedRunId === null ? "(текущий запуск, live tail)" : "(завершённый запуск, из архива)"}
             </span>
           </h2>
           <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-[11px] text-neutral-400 uppercase font-['Space_Grotesk']">
-              <input
-                type="checkbox"
-                className="accent-primary"
-                checked={form.trace}
-                onChange={(e) => updateField("trace", e.currentTarget.checked)}
-                data-testid="trace-toggle"
-              />
-              Trace
-            </label>
             <select
-              className="bg-surface-container text-[11px] font-mono text-neutral-300 px-2 py-1"
+              className={`${FIELD_INPUT} !text-[11px] !px-2 !py-1`}
               value={selectedRunId === null ? "current" : String(selectedRunId)}
               onChange={(e) =>
                 setSelectedRunId(e.currentTarget.value === "current" ? null : Number(e.currentTarget.value))
@@ -754,10 +765,6 @@ export function InferenceDetailPage() {
             </select>
           </div>
         </div>
-        <div className="text-[10px] text-neutral-600 font-mono mb-3" data-testid="trace-note">
-          Trace сохраняет запросы и ответы — их пишет роутер, движок тел не логирует. Действует на
-          последующие запросы, перезапуск не нужен; виден только трафик через роутер.
-        </div>
         {shownLogLines.length === 0 && selectedRunId !== null ? (
           <div className="text-[11px] font-mono text-neutral-500" data-testid="run-log-absent">
             Журнала по этому запуску нет.
@@ -771,28 +778,6 @@ export function InferenceDetailPage() {
           </pre>
         )}
 
-        {selectedRunId !== null && (
-          <div className="mt-4">
-            <div className="text-[10px] font-['Space_Grotesk'] uppercase text-neutral-500 mb-2">
-              Сохранённые запросы{" "}
-              <span className="text-neutral-700 normal-case font-normal">— только при включённом trace</span>
-            </div>
-            {traceEntries.length === 0 ? (
-              <div className="text-[11px] font-mono text-neutral-500" data-testid="run-trace-absent">
-                По этому запуску запросы не сохранялись.
-              </div>
-            ) : (
-              <pre
-                className="bg-black/60 text-[11px] leading-relaxed font-mono text-neutral-400 p-4 h-48 overflow-y-auto"
-                data-testid="run-trace-view"
-              >
-                {traceEntries
-                  .map((entry) => `${entry.at}\n${JSON.stringify(entry.request)}\n${JSON.stringify(entry.response)}`)
-                  .join("\n\n")}
-              </pre>
-            )}
-          </div>
-        )}
       </section>
     </div>
   );

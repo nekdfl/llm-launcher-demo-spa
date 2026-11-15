@@ -104,7 +104,7 @@ function buildCards(
   return profiles.map((profile) => ({
     profile,
     modelName: models.find((m) => m.id === profile.model_id)?.ref ?? `model ${profile.model_id}`,
-    engineName: plugins.find((p) => p.id === profile.engine_plugin_id)?.name ?? `plugin ${profile.engine_plugin_id}`,
+    engineName: plugins.find((p) => p.id === profile.plugin_id)?.name ?? `plugin ${profile.plugin_id}`,
     inferenceCount: inferences.filter((inf) => inf.profile_id === profile.id).length,
     needsReview: profile.needs_review,
     modelUnusableReason: profile.model_validity?.usable === false ? profile.model_validity.reason : null,

@@ -220,29 +220,15 @@ describe("RouterPage — модалка «Ключ создан»: отобра�
     expect(await screen.findByText("llm-raw-key")).toBeInTheDocument();
   });
 
-  it("кнопка копирования пишет значение ключа в буфер обмена", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, { clipboard: { writeText } });
-
-    render(<RouterPage />);
-    await userEvent.click(await screen.findByText("Создать ключ"));
-    await screen.findByText("Model A");
-    await userEvent.click(screen.getByText("Создать", { selector: "button" }));
-    await screen.findByText("llm-raw-key");
-
-    await userEvent.click(screen.getByTestId("copy-key-button"));
-
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("llm-raw-key"));
-    expect(await screen.findByText("Скопировано")).toBeInTheDocument();
-  });
-
-  it("без navigator.clipboard (plain HTTP) копирует через execCommand-фоллбек", async () => {
-    // На стенде navigator.clipboard отсутствует (не undefined.writeText, а
-    // весь clipboard undefined) при обращении по http:// на LAN IP — именно
-    // это роняло кнопку копирования с "Cannot read properties of undefined
-    // (reading 'writeText')" до фикса.
+  it("кнопка копирования пишет значение ключа в буфер обмена (по HTTP, без navigator.clipboard)", async () => {
+    // На стенде (http:// на LAN IP) navigator.clipboard нет — копирование
+    // одним способом через execCommand для всех случаев (lib/clipboard).
     Object.assign(navigator, { clipboard: undefined });
-    const execCommand = vi.fn().mockReturnValue(true);
+    let copied: string | null = null;
+    const execCommand = vi.fn(() => {
+      copied = (document.activeElement as HTMLTextAreaElement | null)?.value ?? null;
+      return true;
+    });
     Object.assign(document, { execCommand });
 
     render(<RouterPage />);
@@ -254,8 +240,8 @@ describe("RouterPage — модалка «Ключ создан»: отобра�
     await userEvent.click(screen.getByTestId("copy-key-button"));
 
     await waitFor(() => expect(execCommand).toHaveBeenCalledWith("copy"));
+    expect(copied).toBe("llm-raw-key");
     expect(await screen.findByText("Скопировано")).toBeInTheDocument();
-    expect(screen.queryByText(/Cannot read properties/)).not.toBeInTheDocument();
   });
 
   it("если execCommand отклонён браузером, ошибка видна внутри модалки «Ключ создан»", async () => {

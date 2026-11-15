@@ -9,7 +9,6 @@ import type {
   DownloadRecord,
   DownloadSettings,
   EngineExtension,
-  EngineInstallation,
   GpuStatusEntry,
   HardwareInfo,
   HistorySettings,
@@ -29,14 +28,41 @@ import type {
   RequestLogEntry,
   SystemUser,
 } from "../src/api/types";
+import { fail } from "./server";
+
+/** Установка движка в снимке стенда: в эмулируемом контракте её нет —
+ * при загрузке она становится engine-плагином (вариантом движка). */
+interface SeedInstallation {
+  id: number;
+  name: string;
+  plugin_id: number;
+  install_fields: Record<string, unknown>;
+  version: string | null;
+  available: boolean;
+  unavailable_reason: string | null;
+}
+
+/** Записи снимка в старой модели: inference и запуски ссылаются на
+ * установку, у профиля плагин назван `engine_plugin_id`. */
+/** Признаки trace, reasoning и модальностей в снимке есть, но в эмулируемом
+ * контракте SPA их нет — при загрузке отбрасываются. */
+interface SeedUiDroppedFields {
+  trace?: boolean;
+  reasoning?: boolean;
+  input_modalities?: string[];
+}
+type SeedProfile = Omit<Profile, "plugin_id"> & SeedUiDroppedFields & { engine_plugin_id: number };
+type SeedInference = Omit<Inference, "plugin_id" | "plugin_version" | "schema_hash" | "needs_review"> &
+  SeedUiDroppedFields & { engine_installation_id: number };
+type SeedRun = Omit<InferenceRun, "plugin_id" | "engine_version"> & { engine_installation_id: number; engine_installation_version: string | null };
 
 interface Seed {
   plugins: PluginRecord[];
-  engines: EngineInstallation[];
+  engines: SeedInstallation[];
   providers: Provider[];
   models: ModelEntity[];
-  profiles: Profile[];
-  inferences: Inference[];
+  profiles: SeedProfile[];
+  inferences: SeedInference[];
   schemas: Record<string, PluginSchema>;
   extensions: Record<string, EngineExtension[]>;
   model_details: Record<string, ModelDetailResponse>;
@@ -44,7 +70,7 @@ interface Seed {
   formulas: Record<string, ProfileFormulaSuggestion>;
   sync_states: RepoSyncState[];
   searches: Record<string, ModelSearchResult[]>;
-  runs: Record<string, InferenceRun[]>;
+  runs: Record<string, SeedRun[]>;
   logs: Record<string, string[]>;
   router_models: Record<string, RouterModelEntry>;
   statuses: Record<string, { status: InferenceStatusLabel }>;
@@ -138,9 +164,80 @@ if (failedInference) {
 seed.settings.downloads.rate_limit_bytes_per_sec = 0;
 seed.settings.downloads.max_concurrent_downloads = 2;
 
+// Снимок стенда — в старой модели: плагин (код) и установки (данные).
+// В эмулируемом контракте плагин и есть вариант движка, поэтому каждая
+// установка становится engine-плагином. Первая установка плагина занимает
+// его id, остальные получают новые; схема, расширения и задачи — от кода.
+const variantByInstallation = new Map<number, number>();
+const providerPlugins = seed.plugins.filter((plugin) => plugin.plugin_type !== "engine");
+const variants: PluginRecord[] = [];
+let nextPluginId = Math.max(...seed.plugins.map((plugin) => plugin.id)) + 1;
+for (const installation of seed.engines) {
+  const code = seed.plugins.find((plugin) => plugin.id === installation.plugin_id);
+  if (!code) continue;
+  const firstOfCode = !variants.some((variant) => variant.path === code.path);
+  const id = firstOfCode ? code.id : nextPluginId++;
+  variants.push({
+    ...code,
+    id,
+    name: installation.name,
+    install_fields: installation.install_fields,
+    engine_version: installation.version,
+    available: installation.available,
+    unavailable_reason: installation.unavailable_reason,
+  });
+  if (!firstOfCode) {
+    seed.schemas[String(id)] = structuredClone(seed.schemas[String(code.id)]);
+    seed.extensions[String(id)] = structuredClone(seed.extensions[String(code.id)] ?? []).map((ext) => ({ ...ext, plugin_id: id }));
+  }
+  variantByInstallation.set(installation.id, id);
+}
+// Код без установок остаётся вариантом без install-полей — недоступным.
+for (const code of seed.plugins.filter((plugin) => plugin.plugin_type === "engine")) {
+  if (variants.some((variant) => variant.path === code.path)) continue;
+  variants.push({ ...code, install_fields: {}, engine_version: null, available: false, unavailable_reason: "install-поля не заданы" });
+}
+const plugins: PluginRecord[] = [
+  ...variants,
+  ...providerPlugins.map((plugin) => ({ ...plugin, install_fields: {}, engine_version: null, available: true, unavailable_reason: null })),
+];
+
+const inferences: Inference[] = [];
+const profiles: Profile[] = seed.profiles.map(({ engine_plugin_id, trace, reasoning, input_modalities, ...profile }) => {
+  void trace, void reasoning, void input_modalities;
+  const firstInference = seed.inferences.find((inference) => inference.profile_id === profile.id);
+  const code = seed.plugins.find((plugin) => plugin.id === engine_plugin_id);
+  const plugin_id = firstInference
+    ? (variantByInstallation.get(firstInference.engine_installation_id) ?? engine_plugin_id)
+    : (variants.find((variant) => variant.path === code?.path)?.id ?? engine_plugin_id);
+  return { ...profile, plugin_id, extensions: profile.extensions ?? {} };
+});
+for (const { engine_installation_id, trace, reasoning, input_modalities, ...inference } of seed.inferences) {
+  void trace, void reasoning, void input_modalities;
+  const profile = profiles.find((candidate) => candidate.id === inference.profile_id);
+  inferences.push({
+    ...inference,
+    plugin_id: profile?.plugin_id ?? variantByInstallation.get(engine_installation_id) ?? 0,
+    extensions: inference.extensions ?? {},
+    plugin_version: profile?.plugin_version ?? "",
+    schema_hash: profile?.schema_hash ?? "",
+    needs_review: profile?.needs_review ?? false,
+  });
+}
+const runs: Record<string, InferenceRun[]> = Object.fromEntries(
+  Object.entries(seed.runs).map(([inferenceId, items]) => [
+    inferenceId,
+    items.map(({ engine_installation_id, engine_installation_version, ...run }) => ({
+      ...run,
+      plugin_id: variantByInstallation.get(engine_installation_id) ?? 0,
+      engine_version: engine_installation_version,
+    })),
+  ])
+);
+
 const processes = new Map<string, ProcessState>();
 let nextPid = 48211;
-for (const inference of seed.inferences) {
+for (const inference of inferences) {
   const status = seed.statuses[inference.id]?.status ?? "stopped";
   processes.set(inference.id, {
     status,
@@ -161,7 +258,7 @@ const users: SystemUser[] = [
   { id: 4, username: "old-tester", role: "user", is_active: false },
 ];
 
-const textInferences = seed.inferences.filter((i) => seed.router_models[i.id]?.task === "text-generation");
+const textInferences = inferences.filter((i) => seed.router_models[i.id]?.task === "text-generation");
 const apiKeys: ApiKeyRecord[] = [
   {
     id: 16,
@@ -278,12 +375,11 @@ const auditLog: Record<string, unknown>[] = [
 ];
 
 export const db = {
-  plugins: seed.plugins,
-  engines: seed.engines,
+  plugins,
   providers: seed.providers,
   models: seed.models,
-  profiles: seed.profiles,
-  inferences: seed.inferences,
+  profiles,
+  inferences,
   schemas: seed.schemas,
   extensions: seed.extensions,
   modelDetails: seed.model_details,
@@ -291,7 +387,7 @@ export const db = {
   formulas: seed.formulas,
   syncStates: seed.sync_states,
   searches: seed.searches,
-  runs: seed.runs,
+  runs,
   logs: seed.logs,
   routerModels: seed.router_models,
   gpuBaseline: seed.gpu_status,
@@ -311,11 +407,16 @@ export const db = {
   bootedAt: Date.now(),
 };
 
+/** Имя кода плагина — каталог, общий у всех вариантов движка; имя самого
+ * плагина — имя варианта («llama.cpp (cuda)»). */
+export function pluginCode(plugin: PluginRecord | undefined): string {
+  return plugin?.path.split("/").pop() ?? "";
+}
+
 export const index = {
   model: (id: number) => byId(db.models).get(id),
   profile: (id: number) => byId(db.profiles).get(id),
   inference: (id: string) => db.inferences.find((i) => i.id === id || i.slug === id),
-  engine: (id: number) => byId(db.engines).get(id),
   plugin: (id: number) => byId(db.plugins).get(id),
 };
 

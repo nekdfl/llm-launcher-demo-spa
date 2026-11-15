@@ -1,13 +1,38 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { orchestratorApi } from "../api/orchestrator";
+import { type FieldDescriptor, orchestratorApi } from "../api/orchestrator";
+import { ArgvEditor } from "../components/ArgvEditor";
+import { EngineBadge } from "../components/EngineBadge";
+import { GpuChecklist, toggleGpuId, useGpuChecklistItems } from "../components/GpuChecklist";
+import { SchemaField } from "../components/SchemaField";
 import { groupModelsByRepo, modelOptionLabel } from "../lib/modelOptionLabel";
-import type { EngineInstallation, ModelEntity, Profile } from "../api/types";
+import type { ModelEntity, Profile } from "../api/types";
+import { FIELD_HINT, FIELD_INPUT, FIELD_LABEL, SECTION_TITLE } from "../components/ui";
 
-const FIELD_LABEL = "text-[11px] text-neutral-500 uppercase font-['Space_Grotesk']";
-const FIELD_INPUT = "bg-surface-container border border-neutral-800 px-3 py-2 font-mono text-xs";
 
-/** Model → profile → cards, per spec ("выбор модели, профиля... карт").
+/** Параметры запуска в мастере: стартуют значениями профиля и уходят при
+ * создании значениями — совпадение с профилем карточка inference покажет
+ * как «из профиля». Остальные поля профиля inference получает копией. */
+interface LaunchDraft {
+  gpuIds: number[];
+  structural: Record<string, unknown>;
+  cliOptions: string;
+  systemPrompt: string;
+}
+
+const EMPTY_LAUNCH: LaunchDraft = { gpuIds: [], structural: {}, cliOptions: "", systemPrompt: "" };
+
+function launchFromProfile(profile: Profile): LaunchDraft {
+  return {
+    gpuIds: [...profile.gpu_ids],
+    structural: { ...profile.structural_fields },
+    cliOptions: profile.cli_options,
+    systemPrompt: profile.system_prompt,
+  };
+}
+
+/** Model → profile → параметры запуска (карты, драйвер, опции, system
+ * prompt), per spec ("выбор модели, профиля... карт").
  * Creating fresh from an engine plugin's schema (no profile) is left for a
  * follow-up — this covers the spec's one required scenario: "Новый
  * inference создаётся из существующего профиля". */
@@ -15,43 +40,57 @@ export function CreateInferencePage() {
   const navigate = useNavigate();
   const [models, setModels] = useState<ModelEntity[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [installations, setInstallations] = useState<EngineInstallation[]>([]);
 
   const [modelId, setModelId] = useState("");
   const [profileId, setProfileId] = useState("");
-  const [installationId, setInstallationId] = useState("");
   const [name, setName] = useState("");
-  const [gpuIds, setGpuIds] = useState("");
+  const [launch, setLaunch] = useState<LaunchDraft>(EMPTY_LAUNCH);
+  const [driverField, setDriverField] = useState<FieldDescriptor | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const [modelsRes, profilesRes, installationsRes] = await Promise.all([
-        orchestratorApi.listModels(),
-        orchestratorApi.listProfiles(),
-        orchestratorApi.listEngineInstallations(),
-      ]);
+      const [modelsRes, profilesRes] = await Promise.all([orchestratorApi.listModels(), orchestratorApi.listProfiles()]);
       setModels(modelsRes);
       setProfiles(profilesRes);
-      setInstallations(installationsRes);
     })();
   }, []);
 
   const profilesForModel = profiles.filter((p) => String(p.model_id) === modelId);
 
+  const selectedProfile = profiles.find((p) => String(p.id) === profileId) ?? null;
   useEffect(() => {
-    const profile = profiles.find((p) => String(p.id) === profileId);
-    if (profile) setGpuIds(profile.gpu_ids.join(","));
-  }, [profileId, profiles]);
+    setLaunch(selectedProfile ? launchFromProfile(selectedProfile) : EMPTY_LAUNCH);
+  }, [selectedProfile]);
+
+  // Драйвер — поле схемы плагина профиля (как в карточке профиля).
+  useEffect(() => {
+    setDriverField(null);
+    if (!selectedProfile) return;
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => orchestratorApi.getPluginSchema(selectedProfile.plugin_id))
+      .then((schema) => {
+        if (!cancelled) setDriverField(schema?.profile_schema.find((field) => field.name === "driver") ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setDriverField(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProfile]);
+
+  const gpuPicker = useGpuChecklistItems(launch.gpuIds);
 
   const handleSubmit = async () => {
     setError(null);
-    if (!modelId || !profileId || !installationId || !name.trim()) {
+    if (!modelId || !profileId || !name.trim()) {
       setError("Заполните все поля");
       return;
     }
-    const profile = profiles.find((p) => String(p.id) === profileId);
+    const profile = selectedProfile;
     if (!profile) return;
 
     setSubmitting(true);
@@ -59,12 +98,10 @@ export function CreateInferencePage() {
       const inference = await orchestratorApi.createInference({
         name: name.trim(),
         profile_id: profile.id,
-        model_id: Number(modelId),
-        engine_installation_id: Number(installationId),
-        gpu_ids: gpuIds.split(",").map((s) => s.trim()).filter(Boolean).map(Number),
-        structural_fields: profile.structural_fields,
-        cli_options: profile.cli_options,
-        system_prompt: profile.system_prompt,
+        gpu_ids: launch.gpuIds,
+        structural_fields: launch.structural,
+        cli_options: launch.cliOptions,
+        system_prompt: launch.systemPrompt,
       });
       navigate(`/inferences/${inference.id}`);
     } catch (err) {
@@ -80,7 +117,7 @@ export function CreateInferencePage() {
         <h1 className="font-['Space_Grotesk'] text-3xl font-extrabold tracking-tighter uppercase">Новый inference</h1>
       </header>
 
-      <section className="bg-surface-container-lowest tactical-accent p-6 max-w-2xl">
+      <section className="bg-surface-container-lowest tactical-accent p-6 max-w-5xl">
         <div className="flex flex-col gap-4 text-sm">
           <label className="flex flex-col gap-1">
             <span className={FIELD_LABEL}>Имя</span>
@@ -133,27 +170,45 @@ export function CreateInferencePage() {
             </select>
           </label>
 
-          <label className="flex flex-col gap-1">
-            <span className={FIELD_LABEL}>Установка движка</span>
-            <select className={FIELD_INPUT} value={installationId} onChange={(e) => setInstallationId(e.currentTarget.value)} required>
-              <option value="" disabled>
-                Выберите установку
-              </option>
-              {installations.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className={`${FIELD_LABEL} flex flex-wrap items-center gap-2`}>
-              Карты
-              <span className="text-neutral-700 normal-case font-normal">— номера GPU через запятую, например 0,1</span>
-            </span>
-            <input className={FIELD_INPUT} value={gpuIds} onChange={(e) => setGpuIds(e.currentTarget.value)} />
-          </label>
+          {selectedProfile && (
+            <div className="flex flex-col gap-4 pt-4 border-t border-neutral-900" data-testid="create-launch-params">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className={`${SECTION_TITLE} !mb-0`}>
+                  Параметры запуска
+                  <EngineBadge pluginId={selectedProfile.plugin_id} />
+                </span>
+                <span className={FIELD_HINT}>из профиля «{selectedProfile.name}», движок — его же; изменённое станет переопределением</span>
+              </div>
+              <GpuChecklist
+                items={gpuPicker.items}
+                selected={new Set(launch.gpuIds)}
+                onToggle={(gpuId) => setLaunch((l) => ({ ...l, gpuIds: toggleGpuId(l.gpuIds, gpuId) }))}
+                nvmlError={gpuPicker.nvmlError}
+              />
+              {driverField && (
+                <div className="max-w-sm">
+                  <SchemaField
+                    field={driverField}
+                    value={launch.structural.driver ?? driverField.default ?? ""}
+                    testId="create-field-driver"
+                    onChange={(value) => setLaunch((l) => ({ ...l, structural: { ...l.structural, driver: value } }))}
+                  />
+                </div>
+              )}
+              <ArgvEditor value={launch.cliOptions} onChange={(value) => setLaunch((l) => ({ ...l, cliOptions: value }))} testId="create-argv" />
+              <label className="flex flex-col gap-1">
+                <span className={FIELD_LABEL}>
+                  System prompt <span className="text-neutral-700 normal-case font-normal">— вставляется роутером в начало каждого запроса</span>
+                </span>
+                <textarea
+                  aria-label="System prompt"
+                  className={`${FIELD_INPUT} h-16`}
+                  value={launch.systemPrompt}
+                  onChange={(e) => setLaunch((l) => ({ ...l, systemPrompt: e.currentTarget.value }))}
+                />
+              </label>
+            </div>
+          )}
 
           {error && <div className="text-xs text-danger font-mono">{error}</div>}
 

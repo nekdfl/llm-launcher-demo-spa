@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { orchestratorApi } from "../../api/orchestrator";
 import type { EngineExtension, ExtensionSelection } from "../../api/types";
+import { INHERITED_BLOCK, InheritanceMark } from "../../components/InheritanceMark";
 import { SchemaField } from "../../components/SchemaField";
-import { SECTION_CARD, SECTION_TITLE } from "../../components/ui";
+import { extensionOverridden } from "../../lib/launchParams";
+import { CHECKBOX, FIELD_HINT, SECTION_CARD, SECTION_TITLE, selectTile, selectTileLabel } from "../../components/ui";
 
 /** Начальные значения опций включаемого расширения — умолчания манифеста. */
 function defaultOptions(extension: EngineExtension): Record<string, unknown> {
@@ -14,17 +16,21 @@ function defaultOptions(extension: EngineExtension): Record<string, unknown> {
 /** Раздел «Расширения» формы профиля: переключатель на каждое готовое
  * расширение плагина и поля его опций по дескрипторам манифеста. Ошибочные
  * расширения не предлагаются; без расширений раздел не показывается.
- * `fieldError` — ошибка сервера с путём `extensions.<имя>[.<опция>]`. */
+ * `fieldError` — ошибка сервера с путём `extensions.<имя>[.<опция>]`.
+ * `profileValue` — выбор профиля: у inference каждое расширение сравнивается
+ * с ним и получает пометку «из профиля» / «переопределено». */
 export function ProfileExtensionsSection({
   pluginId,
   value,
   onChange,
   fieldError,
+  profileValue,
 }: {
   pluginId: number | null;
   value: ExtensionSelection;
   onChange: (value: ExtensionSelection) => void;
   fieldError: { field: string; message: string } | null;
+  profileValue?: ExtensionSelection;
 }) {
   const [extensions, setExtensions] = useState<EngineExtension[]>([]);
 
@@ -59,11 +65,19 @@ export function ProfileExtensionsSection({
       <div className="flex flex-col gap-4">
         {extensions.map((extension) => {
           const enabled = extension.name in value;
+          const overridden = profileValue ? extensionOverridden(value, profileValue, extension.name) : true;
+          const resetToProfile = () => {
+            const next = { ...value };
+            if (profileValue && extension.name in profileValue) next[extension.name] = structuredClone(profileValue[extension.name]);
+            else delete next[extension.name];
+            onChange(next);
+          };
           return (
-            <div key={extension.id} className="bg-surface-container-low p-3">
-              <label className="flex items-center gap-2 text-sm">
+            <div key={extension.id} className={`${selectTile(enabled)} !cursor-default p-3 ${overridden ? "" : INHERITED_BLOCK}`}>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input
                   type="checkbox"
+                  className={CHECKBOX}
                   checked={enabled}
                   data-testid={`extension-toggle-${extension.name}`}
                   onChange={(e) => {
@@ -73,11 +87,16 @@ export function ProfileExtensionsSection({
                     onChange(next);
                   }}
                 />
-                <span className="font-['Space_Grotesk'] font-bold">{extension.name}</span>
-                <span className="text-[11px] text-neutral-500 font-mono">
+                <span className={`font-['Space_Grotesk'] ${selectTileLabel(enabled)}`}>{extension.name}</span>
+                <span className={FIELD_HINT}>
                   v{extension.version} · {extension.task}
                 </span>
               </label>
+              {profileValue && (
+                <div className="text-[10px] font-mono mt-1">
+                  <InheritanceMark overridden={overridden} onReset={resetToProfile} testId={`inherit-extension-${extension.name}`} />
+                </div>
+              )}
               {errorFor(`extensions.${extension.name}`) && (
                 <div className="text-[10px] text-danger font-mono mt-1">{errorFor(`extensions.${extension.name}`)}</div>
               )}

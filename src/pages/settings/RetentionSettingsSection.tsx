@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { orchestratorApi } from "../../api/orchestrator";
-import { FIELD_INPUT, FIELD_LABEL, PRIMARY_BUTTON } from "../../components/ui";
+import { FIELD_INPUT, FIELD_LABEL, PRIMARY_BUTTON, SECTION_TITLE } from "../../components/ui";
 
 /** reference/settings — «Хранение и помощник» tile / «Хранение истории»
  * field in the read-only summary panel. Never built as an editable form
@@ -69,7 +69,7 @@ export function RetentionSettingsSection() {
 
   return (
     <section className="bg-surface-container-lowest p-6 mb-6" data-testid="retention-settings">
-      <h2 className="font-['Space_Grotesk'] text-xs font-bold uppercase tracking-widest text-primary mb-4">
+      <h2 className={SECTION_TITLE}>
         Хранение истории, логов и метрик
       </h2>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-3">

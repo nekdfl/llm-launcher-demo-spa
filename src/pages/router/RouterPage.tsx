@@ -3,16 +3,8 @@ import { accountsApi } from "../../api/accounts";
 import { orchestratorApi } from "../../api/orchestrator";
 import type { ApiKeyCreated, ApiKeyRecord, Inference, RequestLogEntry } from "../../api/types";
 import { Modal } from "../../components/Modal";
-import {
-  FIELD_INPUT,
-  FIELD_LABEL,
-  GHOST_BUTTON,
-  PageHeader,
-  PRIMARY_BUTTON,
-  SECTION_CARD,
-  SECTION_TITLE,
-  StatusBadge,
-} from "../../components/ui";
+import { CHECKBOX, FIELD_HINT, FIELD_INPUT, FIELD_INPUT_ACCENT, FIELD_LABEL, GHOST_BUTTON, PRIMARY_BUTTON, PageHeader, SECTION_CARD, SECTION_TITLE, StatusBadge, selectTile, selectTileLabel } from "../../components/ui";
+import { copyText } from "../../lib/clipboard";
 
 /** "22 февраля 2026 года" from an <input type="date"> value ("" or
  * yyyy-mm-dd, both always well-formed per the native input itself —
@@ -25,32 +17,6 @@ function formatDateRu(isoDate: string): string {
   // only and appending "года" ourselves avoids "...2026 г. года".
   const dayMonth = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" }).format(parsed);
   return `${dayMonth} ${parsed.getFullYear()} года`;
-}
-
-/** navigator.clipboard only exists in a secure context (HTTPS, or
- * localhost/127.0.0.1) — this stand is typically reached over plain HTTP by
- * LAN IP, where it's simply undefined, not just permission-denied. Falls
- * back to the classic hidden-textarea + execCommand("copy") trick, which
- * still works over plain HTTP. */
-async function copyToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-  try {
-    const ok = document.execCommand("copy");
-    if (!ok) throw new Error("не удалось скопировать (execCommand отклонён браузером)");
-  } finally {
-    document.body.removeChild(textarea);
-  }
 }
 
 /** reference/router — API keys (create shows the raw key exactly once, spec)
@@ -113,15 +79,14 @@ export function RouterPage() {
     }
   }
 
-  async function copyKey() {
+  function copyKey() {
     if (!created) return;
-    try {
-      await copyToClipboard(created.key);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось скопировать ключ");
+    if (!copyText(created.key)) {
+      setError("Не удалось скопировать ключ");
+      return;
     }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }
 
   async function confirmRevoke() {
@@ -247,27 +212,26 @@ export function RouterPage() {
       <Modal open={showCreateForm} onClose={() => setShowCreateForm(false)} title="Создание ключа" testId="create-key-modal">
         <div className="mb-4">
           <span className={FIELD_LABEL}>Доступ к моделям</span>
-          <div className="text-[10px] text-neutral-600 font-mono mb-2">
+          <div className={`${FIELD_HINT} mb-2`}>
             Ничего не отмечено — ключ получит доступ ко всем моделям (в т.ч. будущим)
           </div>
-          <div className="flex flex-col gap-1 max-h-40 overflow-y-auto">
-            {inferences.map((inference) => (
-              <label key={inference.id} className="flex items-center gap-2 text-xs font-mono text-neutral-300">
-                <input
-                  type="checkbox"
-                  checked={selectedInferenceIds.includes(inference.id)}
-                  onChange={() => toggleInference(inference.id)}
-                />
-                {inference.name}
-              </label>
-            ))}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 max-h-60 overflow-y-auto">
+            {inferences.map((inference) => {
+              const selected = selectedInferenceIds.includes(inference.id);
+              return (
+                <label key={inference.id} className={`flex items-center gap-2.5 px-3 py-2 text-xs font-mono ${selectTile(selected)}`}>
+                  <input type="checkbox" className={CHECKBOX} checked={selected} onChange={() => toggleInference(inference.id)} />
+                  <span className={`truncate ${selectTileLabel(selected)}`}>{inference.name}</span>
+                </label>
+              );
+            })}
             {inferences.length === 0 && <p className="text-xs text-neutral-500 font-mono">Inference пока нет.</p>}
           </div>
         </div>
 
         <div className="mb-4">
           <span className={FIELD_LABEL}>Срок действия</span>
-          <div className="text-[10px] text-neutral-600 font-mono mb-2">Не выбрано — ключ бессрочный</div>
+          <div className={`${FIELD_HINT} mb-2`}>Не выбрано — ключ бессрочный</div>
           <div className="flex items-center gap-3">
             <input
               type="date"
@@ -338,7 +302,7 @@ export function RouterPage() {
       <Modal open={created !== null} onClose={() => setCreated(null)} title="Ключ создан" testId="created-key-modal">
         <div className="text-xs text-neutral-300 mb-2">Значение ключа показывается один раз — скопируйте его сейчас:</div>
         <div className="flex items-center gap-2 mb-4">
-          <code className="flex-1 bg-surface-container border border-neutral-800 px-3 py-2 font-mono text-xs text-primary break-all">
+          <code className={`${FIELD_INPUT_ACCENT} flex-1 break-all`}>
             {created?.key}
           </code>
           <button

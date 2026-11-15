@@ -5,16 +5,7 @@ import { formatBytes } from "../../lib/formatBytes";
 import type { SystemUser } from "../../api/types";
 import { GpuChecklist } from "../../components/GpuChecklist";
 import { Modal } from "../../components/Modal";
-import {
-  FIELD_INPUT,
-  FIELD_LABEL,
-  GHOST_BUTTON,
-  PageHeader,
-  PRIMARY_BUTTON,
-  SECTION_CARD,
-  SECTION_TITLE,
-  StatusBadge,
-} from "../../components/ui";
+import { CHECKBOX, FIELD_HINT, FIELD_INPUT, FIELD_LABEL, GHOST_BUTTON, PRIMARY_BUTTON, PageHeader, SECTION_CARD, SECTION_TITLE, StatusBadge, selectTile, selectTileLabel } from "../../components/ui";
 import { accountsApi } from "../../api/accounts";
 
 /** /settings/users — «Пользователи» (reference/settings, users table):
@@ -267,7 +258,7 @@ export function ModelsDirSettingsPage() {
           </button>
           {saved && <span className="text-xs text-primary font-mono">Сохранено</span>}
         </div>
-        <div className="text-[10px] text-neutral-600 font-mono mt-3">
+        <div className={`${FIELD_HINT} mt-3`}>
           Каталог применяется к новым загрузкам; уже скачанные файлы не перемещаются. Потолок скорости — общий бюджет на все активные закачки: он делится между ними поровну и пересчитывается, когда их число меняется.
         </div>
       </section>
@@ -357,7 +348,7 @@ export function NetworkSettingsPage() {
           </button>
           {saved && <span className="text-xs text-primary font-mono">Сохранено</span>}
         </div>
-        <div className="text-[10px] text-neutral-600 font-mono mt-3">
+        <div className={`${FIELD_HINT} mt-3`}>
           Новый запуск берёт свободный порт из диапазона; уже запущенные inference не переключаются.
         </div>
       </section>
@@ -457,7 +448,7 @@ export function CpuGpuSettingsPage() {
 
             {hardware.gpus && hardware.gpus.length > 0 && (
               <div>
-                <div className="text-[11px] font-['Space_Grotesk'] uppercase text-neutral-500 mb-2">Видеокарты</div>
+                <div className={`${FIELD_LABEL} mb-2`}>Видеокарты</div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {hardware.gpus.map((gpu) => (
                     <div key={gpu.gpu_id} className="bg-surface-container p-3 text-[11px] font-mono">
@@ -509,29 +500,29 @@ export function CpuGpuSettingsPage() {
         {/* CPU чекбоксы по NUMA-узлам */}
         {allCpus.length > 0 && (
           <div className="mb-5">
-            <div className="text-[11px] font-['Space_Grotesk'] uppercase text-neutral-500 mb-2">
+            <div className={`${FIELD_LABEL} mb-2`}>
               Ядра процессора ({selectedCpus.size} из {allCpus.length} выбрано)
             </div>
             <div className="flex flex-col gap-3">
               {Object.entries(hardware?.numa_topology ?? {}).map(([node, cpus]) => (
                 <div key={node}>
-                  <div className="text-[10px] text-neutral-600 uppercase font-mono mb-1">CPU node {node}</div>
+                  <div className={`${FIELD_HINT} uppercase mb-1`}>CPU node {node}</div>
                   <div className="flex flex-wrap gap-2">
-                    {cpus.map((cpuId) => (
-                      <label
-                        key={cpuId}
-                        className="flex items-center gap-1.5 text-xs text-neutral-300 bg-surface-container px-2 py-1 cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          className="accent-primary"
-                          checked={selectedCpus.has(cpuId)}
-                          onChange={() => toggleCpu(cpuId)}
-                          data-testid={`cpu-checkbox-${cpuId}`}
-                        />
-                        {cpuId}
-                      </label>
-                    ))}
+                    {cpus.map((cpuId) => {
+                      const selected = selectedCpus.has(cpuId);
+                      return (
+                        <label key={cpuId} className={`flex items-center gap-1.5 text-xs font-mono px-2 py-1 ${selectTile(selected)}`}>
+                          <input
+                            type="checkbox"
+                            className={CHECKBOX}
+                            checked={selected}
+                            onChange={() => toggleCpu(cpuId)}
+                            data-testid={`cpu-checkbox-${cpuId}`}
+                          />
+                          <span className={selectTileLabel(selected)}>{cpuId}</span>
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               ))}
@@ -547,7 +538,7 @@ export function CpuGpuSettingsPage() {
           </button>
           {saved && <span className="text-xs text-primary font-mono">Сохранено</span>}
         </div>
-        <div className="text-[10px] text-neutral-600 font-mono mt-3">
+        <div className={`${FIELD_HINT} mt-3`}>
           Изменение пула CPU влияет на новые запуски (AllowedCPUs транзиентного юнита).
         </div>
       </section>
@@ -628,7 +619,7 @@ export function InferenceSettingsPage() {
           </button>
           {saved && <span className="text-xs text-primary font-mono">Сохранено</span>}
         </div>
-        <div className="text-[10px] text-neutral-600 font-mono mt-3">
+        <div className={`${FIELD_HINT} mt-3`}>
           Журнал старше срока или сверх числа удаляется при следующем старте оркестратора; запись запуска
           остаётся с пометкой об отсутствии журнала.
         </div>

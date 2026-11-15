@@ -155,7 +155,7 @@ export function ModelCard({
   return (
     <section className={SECTION_CARD} data-testid={testId}>
       <div className="flex items-center justify-between">
-        <h2 className={`${SECTION_TITLE} flex items-center gap-2`}>
+        <h2 className={SECTION_TITLE}>
           Карточка модели
           {favorite !== undefined && onToggleFavorite && (
             <button

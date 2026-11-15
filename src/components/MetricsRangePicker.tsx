@@ -1,4 +1,5 @@
 import { METRICS_RANGES, type MetricsRangeKey } from "../hooks/useMetricsSeries";
+import { FIELD_HINT } from "./ui";
 
 /** Выбор диапазона на месте прежней подписи «окно: 1ч». Выбор — дело
  * вкладки, не серверная настройка, поэтому хранится в localStorage
@@ -14,7 +15,7 @@ export function MetricsRangePicker({
 }) {
   return (
     <span className="flex items-center gap-1" data-testid={testId}>
-      <span className="text-[10px] font-mono text-neutral-600 uppercase mr-1">окно:</span>
+      <span className={`${FIELD_HINT} uppercase mr-1`}>окно:</span>
       {METRICS_RANGES.map((range) => (
         <button
           key={range.key}

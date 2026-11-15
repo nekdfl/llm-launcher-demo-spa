@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { login } from "../api/auth";
+import { FIELD_INPUT } from "../components/ui";
 
 export function LoginPage() {
   const [username, setUsername] = useState("");
@@ -33,7 +34,7 @@ export function LoginPage() {
           <label className="flex flex-col gap-1">
             <span className="text-[11px] text-neutral-500 uppercase font-['Space_Grotesk']">Логин</span>
             <input
-              className="bg-surface-container border border-neutral-800 px-3 py-2 font-mono text-xs"
+              className={FIELD_INPUT}
               value={username}
               onChange={(e) => setUsername(e.currentTarget.value)}
               required
@@ -43,7 +44,7 @@ export function LoginPage() {
             <span className="text-[11px] text-neutral-500 uppercase font-['Space_Grotesk']">Пароль</span>
             <input
               type="password"
-              className="bg-surface-container border border-neutral-800 px-3 py-2 font-mono text-xs"
+              className={FIELD_INPUT}
               value={password}
               onChange={(e) => setPassword(e.currentTarget.value)}
               required

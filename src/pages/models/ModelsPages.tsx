@@ -5,7 +5,7 @@ import type { DownloadRecord, RepoSyncState } from "../../api/types";
 import { DownloadStatsPanel } from "../../components/DownloadStatsPanel";
 import { ModelTile } from "../../components/ModelTile";
 import { ModelsQuickSwitch } from "../../components/ModelsQuickSwitch";
-import { PageHeader, type AccentTone } from "../../components/ui";
+import { FIELD_HINT, PageHeader, type AccentTone } from "../../components/ui";
 import { formatBytes } from "../../lib/formatBytes";
 
 // Опрос хода проверки — того же порядка, что остальные опросы интерфейса.
@@ -160,7 +160,7 @@ export function DownloadedModelsPage() {
       </PageHeader>
 
       {lastCheckedAt && (
-        <p className="text-[10px] font-mono text-neutral-600 mb-4" data-testid="last-checked-at">
+        <p className={`${FIELD_HINT} mb-4`} data-testid="last-checked-at">
           последняя проверка: {new Date(`${lastCheckedAt}Z`).toLocaleString("ru-RU")}
         </p>
       )}

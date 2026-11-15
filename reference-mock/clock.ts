@@ -48,12 +48,11 @@ let nextRunId = Math.max(0, ...Object.values(db.runs).flat().map((r) => r.id)) +
 
 export function startProcess(inference: Inference, overrideGpuIds?: number[]): { unit: string; warnings: string[] } {
   const model = index.model(inference.model_id);
-  const installation = index.engine(inference.engine_installation_id);
+  const plugin = index.plugin(inference.plugin_id);
   if (model && !model.validity.usable) fail(409, `модель недоступна: ${model.validity.reason} (${model.file_path})`);
-  if (installation && !installation.available) fail(409, `установка недоступна: ${installation.unavailable_reason}`);
+  if (plugin && !plugin.available) fail(409, `движок недоступен: ${plugin.unavailable_reason}`);
   const p = proc(inference.id);
   if (isLive(p)) fail(409, `inference ${inference.id} уже запущен`);
-  const plugin = installation ? index.plugin(installation.plugin_id) : undefined;
   if (plugin && plugin.status !== "ok") fail(409, `плагин ${plugin.id} не загружен: статус ${plugin.status}`);
   if (plugin && !plugin.enabled) fail(409, `плагин ${plugin.id} отключён`);
 
@@ -73,8 +72,8 @@ export function startProcess(inference: Inference, overrideGpuIds?: number[]): {
     id: nextRunId++,
     inference_id: inference.id,
     profile_id: inference.profile_id,
-    engine_installation_id: inference.engine_installation_id,
-    engine_installation_version: installation?.version ?? null,
+    plugin_id: inference.plugin_id,
+    engine_version: plugin?.engine_version ?? null,
     gpu_ids: p.gpuIds,
     port: inference.port,
     started_at: isoNow(),
@@ -86,7 +85,7 @@ export function startProcess(inference: Inference, overrideGpuIds?: number[]): {
     log_file_path: null,
   };
   (db.runs[inference.id] ??= []).unshift(run);
-  logLine(inference, `starting ${installation?.name ?? "engine"} | model ${model?.file_path ?? "?"} | port ${inference.port} | gpus ${p.gpuIds.join(",")}`);
+  logLine(inference, `starting ${plugin?.name ?? "engine"} | model ${model?.file_path ?? "?"} | port ${inference.port} | gpus ${p.gpuIds.join(",")}`);
   return { unit: `llm-${inference.id}.service`, warnings: [] };
 }
 
@@ -140,7 +139,10 @@ export function gpuStatus(ids: number[], inferenceIds: string[]): GpuStatusEntry
       const temp = Math.round(27 + util * 0.45 + (here.length ? 4 : 0));
       // Сверка как в gpu_reconciliation оркестратора: намерение — по
       // сохранённым картам переданных inference, без учёта их статуса.
-      const intended = inferenceIds.filter((id) => index.inference(id)?.gpu_ids.includes(base.gpu_id));
+      const intended = inferenceIds.filter((id) => {
+        const inference = index.inference(id);
+        return inference ? inference.gpu_ids.includes(base.gpu_id) : false;
+      });
       const used = 1_048_576 + processes.reduce((s, x) => s + x.used_bytes, 0);
       return {
         ...base,

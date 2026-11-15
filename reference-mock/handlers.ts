@@ -8,12 +8,14 @@ import type {
   ModelDetailResponse,
   ModelEntity,
   ModelSearchResult,
+  PluginRecord,
   Profile,
   RepoSyncState,
   SystemUser,
 } from "../src/api/types";
 import { fail, noContent, RawResponse, route, setInitialLogLines, type MockRequest } from "./server";
-import { db, GiB, index, isoNow, nextId, uuid, type DownloadState } from "./state";
+import { db, GiB, index, isoNow, nextId, pluginCode, uuid, type DownloadState } from "./state";
+import { PROFILE_PARITY_KEYS, profileParityValues } from "../src/lib/launchParams";
 import {
   currentThroughput,
   gpuStatus,
@@ -95,30 +97,42 @@ route("DELETE", "/accounts/users/:id", (_, p) => {
 
 route("GET", "/inferences", () => db.inferences.map(withValidity));
 route("GET", "/inferences/:id", (_, p) => withValidity(mustInference(p.id)));
+/** Параметры запуска inference всегда хранят значение: `null` больше не
+ * значит «из профиля» и отклоняется так же, как отклонил бы бэкенд. */
+function rejectNullParams(input: Record<string, unknown>) {
+  const nulls = PROFILE_PARITY_KEYS.filter((key) => key in input && input[key] === null);
+  if (nulls.length) fail(422, `поля не могут быть null: ${nulls.join(", ")}`);
+}
+
 route("POST", "/inferences", (req) => {
   const input = body<Partial<Inference> & { name: string; profile_id: number }>(req);
+  rejectNullParams(input);
   const profile = mustProfile(input.profile_id);
   const slug = slugify(input.name);
   if (db.inferences.some((i) => i.slug === slug)) fail(409, `inference со slug '${slug}' уже существует`);
   if (input.port && db.inferences.some((i) => i.port === input.port))
     fail(409, `порт ${input.port} уже занят другим inference (уникален независимо от состояния)`);
+  // Незаданные параметры — копия профиля; плагин и служебные поля — всегда
+  // профильные: движок inference отдельно не выбирает.
+  const fromProfile = profileParityValues(profile);
   const inference: Inference = {
     id: uuid(),
     slug,
     name: input.name,
     profile_id: profile.id,
-    model_id: input.model_id ?? profile.model_id,
-    engine_installation_id: input.engine_installation_id ?? 0,
-    gpu_ids: input.gpu_ids?.length ? input.gpu_ids : [...profile.gpu_ids],
+    model_id: profile.model_id,
+    plugin_id: profile.plugin_id,
+    gpu_ids: input.gpu_ids ?? fromProfile.gpu_ids,
     port: input.port ?? profile.port ?? freePort(),
-    structural_fields: input.structural_fields ?? { ...profile.structural_fields },
-    cli_options: input.cli_options ?? profile.cli_options,
-    system_prompt: input.system_prompt ?? profile.system_prompt,
+    structural_fields: input.structural_fields ?? fromProfile.structural_fields,
+    cli_options: input.cli_options ?? fromProfile.cli_options,
+    system_prompt: input.system_prompt ?? fromProfile.system_prompt,
     autostart: input.autostart ?? false,
-    reasoning: input.reasoning ?? profile.reasoning,
-    input_modalities: input.input_modalities ?? profile.input_modalities,
-    trace: input.trace ?? false,
-    extensions: profile.extensions ?? {},
+    autostart_order: input.autostart_order ?? 0,
+    extensions: input.extensions ?? fromProfile.extensions,
+    plugin_version: profile.plugin_version,
+    schema_hash: profile.schema_hash,
+    needs_review: profile.needs_review,
     last_started_at: null,
     last_run_peak_vram_bytes: null,
     last_run_peak_ram_bytes: null,
@@ -128,12 +142,13 @@ route("POST", "/inferences", (req) => {
     status: "stopped", readyAt: null, stoppingUntil: null, pid: 0,
     gpuIds: [...inference.gpu_ids], tokensIn: 0, tokensOut: 0, busyUntil: 0,
   });
-  const plugin = index.plugin(index.engine(inference.engine_installation_id)?.plugin_id ?? 0);
+  const plugin = index.plugin(inference.plugin_id);
   db.routerModels[inference.id] = {
     id: inference.id,
     slug,
     task: plugin?.tasks[0] ?? "text-generation",
-    input_modalities: inference.input_modalities,
+    // Каталог роутера — свои данные: модальности входа следуют из задачи движка.
+    input_modalities: plugin?.tasks.some((task) => task.includes("speech-recognition")) ? ["audio"] : ["text"],
     output_modalities: plugin?.tasks[0] === "text-to-speech" ? ["speech"] : ["text"],
   };
   db.runs[inference.id] = [];
@@ -142,12 +157,17 @@ route("POST", "/inferences", (req) => {
 });
 route("PATCH", "/inferences/:id", (req, p) => {
   const inference = mustInference(p.id);
+  // Плагин, модель, профиль и служебные поля из правки не принимаются:
+  // они следуют за профилем, а не за формой.
   const patch = body<Partial<Inference>>(req);
+  for (const key of ["plugin_id", "model_id", "profile_id", "plugin_version", "schema_hash", "needs_review"] as const) delete patch[key];
+  rejectNullParams(patch);
   if (patch.slug && db.inferences.some((i) => i !== inference && i.slug === patch.slug))
     fail(409, `inference со slug '${patch.slug}' уже существует`);
   if (patch.port && db.inferences.some((i) => i !== inference && i.port === patch.port))
     fail(409, `порт ${patch.port} уже занят другим inference`);
-  Object.assign(inference, patch);
+  // Служебные поля ведутся так же, как при сохранении профиля.
+  Object.assign(inference, patch, { needs_review: false });
   return withValidity(inference);
 });
 route("DELETE", "/inferences/:id", (_, p) => {
@@ -157,6 +177,82 @@ route("DELETE", "/inferences/:id", (_, p) => {
   db.inferences.splice(db.inferences.indexOf(inference), 1);
   db.processes.delete(inference.id);
   return undefined;
+});
+
+// --- launch command preview ---------------------------------------------
+// argv повторяет `build_command` / `build_env` плагинов (plugins/*/plugin.py):
+// исполняемый файл — из install_fields варианта движка, ядро подставляет модель,
+// имя, хост и порт, опции командной строки идут как есть.
+
+interface LaunchCommandInput {
+  plugin_id: number;
+  model_id: number;
+  inference_name?: string | null;
+  port?: number | null;
+  gpu_ids: number[];
+  structural_fields: Record<string, unknown>;
+  cli_options: string;
+}
+
+function splitOptions(text: string): string[] {
+  return text.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((token) => token.replace(/^(["'])(.*)\1$/, "$2")) ?? [];
+}
+
+function shellQuote(token: string): string {
+  return /^[\w@%+=:,./-]+$/.test(token) ? token : `'${token.replace(/'/g, `'\\''`)}'`;
+}
+
+route("POST", "/launch-command/preview", (req) => {
+  const input = body<LaunchCommandInput>(req);
+  const plugin = index.plugin(input.plugin_id);
+  if (!plugin || Object.keys(plugin.install_fields).length === 0)
+    fail(409, `у движка ${plugin?.name ?? input.plugin_id} не заданы install-поля`);
+  const model = index.model(input.model_id);
+  if (!model) fail(404, `модель ${input.model_id} не найдена`);
+  const modelPath = model!.file_path;
+  const name = input.inference_name || "<имя inference>";
+  const port = input.port ? String(input.port) : "<порт>";
+  const fields = plugin!.install_fields as Record<string, string>;
+  const options = splitOptions(input.cli_options);
+  const env: Record<string, string> = {};
+  const gpuIds = input.gpu_ids;
+  const tensorParallel = String(Math.max(gpuIds.length, 1));
+  let argv: string[];
+  switch (pluginCode(plugin)) {
+    case "llama-cpp":
+      argv = [fields.llama_server_path, "-m", modelPath, "--alias", name, "--host", "0.0.0.0", "--port", port];
+      if (input.structural_fields.driver === "nvidia" && gpuIds.length) {
+        argv.push("--main-gpu", String(gpuIds[0]));
+        if (gpuIds.length > 1) argv.push("--tensor-split", gpuIds.map(() => "1").join(","));
+      }
+      break;
+    case "vllm":
+      argv = [`${fields.venv_path}/bin/vllm`, "serve", modelPath, "--host", "0.0.0.0", "--port", port,
+        "--served-model-name", name, "--tensor-parallel-size", tensorParallel, "--enable-force-include-usage"];
+      break;
+    case "sglang":
+      argv = [`${fields.venv_path}/bin/python3`, "-m", "sglang.launch_server", "--model-path", modelPath,
+        "--host", "0.0.0.0", "--port", port, "--served-model-name", name, "--tp-size", tensorParallel];
+      break;
+    case "tabbyapi":
+      argv = [`${fields.venv_path}/bin/python3`, `${fields.venv_path.replace(/\/[^/]+$/, "")}/server/main.py`, "--host", "0.0.0.0",
+        "--port", port, "--model-name", modelPath, "--disable-auth", "true"];
+      break;
+    default: {
+      const executable = Object.values(fields).find((value) => typeof value === "string" && value.startsWith("/")) ?? "";
+      argv = [executable, "--model", modelPath, "--host", "0.0.0.0", "--port", port];
+    }
+  }
+  // Движки без argv-флага выбора карт получают их через окружение.
+  if (pluginCode(plugin) !== "llama-cpp" && gpuIds.length) env.CUDA_VISIBLE_DEVICES = gpuIds.join(",");
+  argv.push(...options);
+  const envPrefix = Object.entries(env).map(([key, value]) => `${key}=${shellQuote(value)}`);
+  return {
+    argv,
+    env,
+    command: [...envPrefix, ...argv.map(shellQuote)].join(" "),
+    plugin_name: plugin!.name,
+  };
 });
 
 route("POST", "/inferences/stop-all", () => ({
@@ -226,18 +322,6 @@ route("GET", "/history/runs/:id/log", (req, p) => {
   const lines = num(req.query.get("lines") ?? "200");
   const log = (db.logs[run.inference_id] ?? []).slice(-lines);
   return new RawResponse([`# журнал запуска #${run.id} (${run.started_at})`, ...log].join("\n"));
-});
-route("GET", "/history/runs/:id/trace", (_, p) => {
-  const run = mustRun(num(p.id));
-  const inference = index.inference(run.inference_id);
-  if (!inference?.trace) return [];
-  return [
-    {
-      at: run.started_at,
-      request: { model: inference.slug, messages: [{ role: "user", content: "Кратко: что такое KV-кэш?" }], stream: false },
-      response: { choices: [{ message: { role: "assistant", content: "Кэш ключей и значений внимания для уже обработанных токенов." } }], usage: { prompt_tokens: 18, completion_tokens: 14 } },
-    },
-  ];
 });
 route("GET", "/history/settings", () => db.settings.history);
 route("PATCH", "/history/settings", (req) => Object.assign(db.settings.history, body(req)));
@@ -376,8 +460,8 @@ function synthesizeDetail(ref: string): ModelDetailResponse {
     files: fileDetails,
     local_bytes: fileDetails.reduce((s, f) => s + (f.local_size ?? 0), 0),
     repo_format: format,
-    supporting_engines: db.engines
-      .filter((e) => e.available && index.plugin(e.plugin_id)?.model_formats?.includes(format))
+    supporting_engines: db.plugins
+      .filter((e) => e.plugin_type === "engine" && e.available && e.model_formats?.includes(format))
       .map((e) => ({ id: e.id, name: e.name })),
   };
 }
@@ -585,21 +669,19 @@ route("DELETE", "/downloads/:id", (_, p) => {
 route("GET", "/profiles", () => db.profiles.map(withValidity));
 route("GET", "/profiles/:id", (_, p) => withValidity(mustProfile(num(p.id))));
 route("POST", "/profiles", (req) => {
-  const input = body<Partial<Profile> & { name: string; model_id: number; engine_plugin_id: number }>(req);
+  const input = body<Partial<Profile> & { name: string; model_id: number; plugin_id: number }>(req);
   if (db.profiles.some((p) => p.name === input.name)) fail(409, `профиль с именем '${input.name}' уже существует`);
   const profile: Profile = {
     id: nextId(db.profiles),
     name: input.name,
     model_id: input.model_id,
-    engine_plugin_id: input.engine_plugin_id,
+    plugin_id: input.plugin_id,
     gpu_ids: input.gpu_ids ?? [],
     port: input.port ?? null,
     structural_fields: input.structural_fields ?? {},
     cli_options: input.cli_options ?? "",
     system_prompt: input.system_prompt ?? "",
-    reasoning: input.reasoning ?? false,
-    input_modalities: input.input_modalities ?? ["text"],
-    plugin_version: input.plugin_version ?? index.plugin(input.engine_plugin_id)?.plugin_version ?? "",
+    plugin_version: input.plugin_version ?? index.plugin(input.plugin_id)?.plugin_version ?? "",
     schema_hash: hash(JSON.stringify(input)).toString(16),
     origin_profile_id: null,
     needs_review: false,
@@ -633,46 +715,55 @@ route("POST", "/profiles/:id/copy", (req, p) => {
 
 // --- engines, providers, plugins -----------------------------------------
 
-route("GET", "/engine-installations", () => db.engines);
-route("GET", "/engine-installations/:id", (_, p) => index.engine(num(p.id)) ?? fail(404, `установка ${p.id} не найдена`));
-function versionCheck(installation: (typeof db.engines)[number]) {
-  const paths = Object.values(installation.install_fields).filter((v): v is string => typeof v === "string");
+// Engine-плагин — вариант движка: install-поля, версия и доступность живут
+// в нём самом, новый вариант копирует код образца.
+function versionCheck(plugin: PluginRecord) {
+  const paths = Object.values(plugin.install_fields).filter((v): v is string => typeof v === "string");
   const broken = paths.find((v) => v.startsWith("/") && /missing|nonexistent|tmp\/none/.test(v)) ?? (paths.some((v) => v.trim() === "") ? "" : undefined);
-  const plugin = index.plugin(installation.plugin_id);
-  if (installation.name === "moss-tts" || broken !== undefined) {
+  if (pluginCode(plugin) === "moss-tts" || broken !== undefined || paths.length === 0) {
     return {
       available: false,
-      version: null,
-      unavailable_reason: installation.name === "moss-tts" ? "проверка версии не прошла: python: No module named 'moss_tts'" : `исполняемый файл не найден: ${broken}`,
+      engine_version: null,
+      unavailable_reason:
+        pluginCode(plugin) === "moss-tts"
+          ? "проверка версии не прошла: python: No module named 'moss_tts'"
+          : paths.length === 0
+            ? "install-поля не заданы"
+            : `исполняемый файл не найден: ${broken}`,
     };
   }
-  return { available: true, version: installation.version ?? plugin?.plugin_version ?? "1.0.0", unavailable_reason: null };
+  return { available: true, engine_version: plugin.engine_version ?? plugin.plugin_version, unavailable_reason: null };
 }
-route("POST", "/engine-installations", (req) => {
-  const input = body<{ name: string; plugin_id: number; install_fields: Record<string, unknown> }>(req);
-  if (db.engines.some((e) => e.name === input.name)) fail(409, `установка с именем '${input.name}' уже существует`);
-  const installation = { id: nextId(db.engines), ...input, version: null, available: false, unavailable_reason: null };
-  Object.assign(installation, versionCheck(installation));
-  db.engines.push(installation);
-  return installation;
+function mustEnginePlugin(id: string): PluginRecord {
+  const plugin = index.plugin(num(id));
+  if (!plugin || plugin.plugin_type !== "engine") return fail(404, `движок ${id} не найден`);
+  return plugin;
+}
+function rejectTakenPluginName(name: string, self?: PluginRecord) {
+  if (db.plugins.some((other) => other !== self && other.name === name)) fail(409, `движок с именем '${name}' уже существует`);
+}
+route("POST", "/plugins/:id/variants", (req, p) => {
+  const source = mustEnginePlugin(p.id);
+  const input = body<{ name: string; install_fields: Record<string, unknown> }>(req);
+  rejectTakenPluginName(input.name);
+  const id = nextId(db.plugins);
+  const variant: PluginRecord = { ...structuredClone(source), id, name: input.name, install_fields: input.install_fields, engine_version: null };
+  Object.assign(variant, versionCheck(variant));
+  db.plugins.push(variant);
+  db.schemas[id] = structuredClone(db.schemas[source.id]);
+  db.extensions[id] = structuredClone(db.extensions[source.id] ?? []).map((ext) => ({ ...ext, plugin_id: id }));
+  return variant;
 });
-route("PATCH", "/engine-installations/:id", (req, p) => {
-  const installation = index.engine(num(p.id)) ?? fail(404, `установка ${p.id} не найдена`);
-  const patch = body<{ name?: string }>(req);
-  if (patch.name && db.engines.some((e) => e !== installation && e.name === patch.name)) fail(409, `установка с именем '${patch.name}' уже существует`);
-  Object.assign(installation, patch);
-  return Object.assign(installation, versionCheck(installation));
+route("PATCH", "/plugins/:id", (req, p) => {
+  const plugin = mustEnginePlugin(p.id);
+  const patch = body<{ name?: string; install_fields?: Record<string, unknown> }>(req);
+  if (patch.name) rejectTakenPluginName(patch.name, plugin);
+  Object.assign(plugin, patch);
+  return Object.assign(plugin, versionCheck(plugin));
 });
-route("POST", "/engine-installations/:id/recheck", (_, p) => {
-  const installation = index.engine(num(p.id)) ?? fail(404, `установка ${p.id} не найдена`);
-  return Object.assign(installation, versionCheck(installation));
-});
-route("DELETE", "/engine-installations/:id", (_, p) => {
-  const installation = index.engine(num(p.id)) ?? fail(404, `установка ${p.id} не найдена`);
-  const used = db.inferences.filter((i) => i.engine_installation_id === installation.id);
-  if (used.length) fail(409, `нельзя удалить установку: её используют inference ${used.map((i) => i.slug).join(", ")}`);
-  db.engines.splice(db.engines.indexOf(installation), 1);
-  return undefined;
+route("POST", "/plugins/:id/recheck", (_, p) => {
+  const plugin = mustEnginePlugin(p.id);
+  return Object.assign(plugin, versionCheck(plugin));
 });
 
 route("GET", "/providers", () => db.providers);
@@ -697,8 +788,12 @@ route("POST", "/plugins/:id/disable", togglePlugin(false));
 route("POST", "/plugins/:id/enable", togglePlugin(true));
 route("DELETE", "/plugins/:id", (_, p) => {
   const plugin = index.plugin(num(p.id)) ?? fail(404, `плагин ${p.id} не найден`);
-  const used = db.engines.filter((e) => e.plugin_id === plugin.id);
-  if (used.length) fail(409, `нельзя удалить плагин: есть установки ${used.map((e) => e.name).join(", ")}`);
+  const used = [
+    ...db.profiles.filter((profile) => profile.plugin_id === plugin.id).map((profile) => `профиль ${profile.name}`),
+    ...db.inferences.filter((inference) => inference.plugin_id === plugin.id).map((inference) => `inference ${inference.slug}`),
+    ...db.providers.filter((provider) => provider.plugin_id === plugin.id).map((provider) => `провайдер ${provider.name}`),
+  ];
+  if (used.length) fail(409, `нельзя удалить плагин: на него ссылаются ${used.join(", ")}`);
   db.plugins.splice(db.plugins.indexOf(plugin), 1);
   return undefined;
 });
@@ -721,6 +816,7 @@ route("POST", "/plugins/install", async (req) => {
     id, name, plugin_version: "0.1.0", contract_version: "1", plugin_type: "engine",
     path: `/home/demo/.local/share/llm-launcher/plugins/${name}`, status: "ok", error_detail: null,
     enabled: true, tasks: ["text-generation"], model_formats: ["gguf"],
+    install_fields: {}, engine_version: null, available: false, unavailable_reason: "install-поля не заданы",
   });
   db.schemas[id] = { install_schema: [], profile_schema: [], tasks: ["text-generation"], extensions_unsupported_reason: `плагин ${name} не поддерживает расширения`, extensions: [] };
   return { status: "installed", name };

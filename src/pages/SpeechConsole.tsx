@@ -106,7 +106,7 @@ export function SpeechConsole({ inferenceId, running }: { inferenceId: string; r
           <label className="flex flex-col gap-1">
             <span className={FIELD_LABEL}>Аудиофайл</span>
             <input type="file" accept="audio/*" data-testid="speech-file"
-                   className="bg-surface-container border border-neutral-800 px-3 py-2 font-mono text-xs"
+                   className={FIELD_INPUT}
                    onChange={(e) => setFile(e.currentTarget.files?.[0] ?? null)} />
           </label>
           <div>
